@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Cloud Code Router
+  router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cloud-code-router
+    ports:
+      - "3000:3000"
+    volumes:
+      # Konfiguration als Volume mounten (wird nicht überschrieben)
+      - ./config.json:/app/config/config.json:ro
+      # Logs als Volume mounten
+      - ./logs:/app/logs
+    environment:
+      # Environment-Variablen aus .env-Datei laden
+      - NODE_ENV=production
+      # Provider API-Schlüssel (optional, können auch in config.json stehen)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ROUTER_API_KEY=${ROUTER_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ccr-network
+
+  # Optional: Ollama für lokale Modelle (falls benötigt)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - ccr-network
+
+networks:
+  ccr-network:
+    driver: bridge
+
+volumes:
+  ollama-data:

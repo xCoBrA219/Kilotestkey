@@ -1,0 +1,97 @@
+{
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "apiKey": "${ROUTER_API_KEY}",
+    "corsOrigins": ["*"],
+    "rateLimit": {
+      "enabled": true,
+      "requestsPerMinute": 100
+    }
+  },
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseUrl": "https://api.openai.com/v1",
+      "models": ["gpt-4", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"],
+      "enabled": true,
+      "timeout": 30000,
+      "maxRetries": 3
+    },
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "models": ["claude-3-sonnet", "claude-3-haiku", "claude-3-opus"],
+      "enabled": true,
+      "timeout": 30000,
+      "maxRetries": 3
+    },
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "baseUrl": "https://api.deepseek.com",
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "enabled": true,
+      "timeout": 60000,
+      "maxRetries": 3
+    },
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "models": [
+        "anthropic/claude-3-sonnet",
+        "google/gemini-pro",
+        "meta/llama-3",
+        "openai/gpt-4",
+        "mistralai/mistral-7b-instruct"
+      ],
+      "enabled": true,
+      "timeout": 30000,
+      "maxRetries": 3
+    },
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "models": ["llama3", "mistral", "phi3", "qwen2.5"],
+      "enabled": true,
+      "timeout": 120000,
+      "maxRetries": 3
+    }
+  },
+  "routing": {
+    "default": "openai,gpt-4",
+    "rules": [
+      {
+        "pattern": "code-*",
+        "target": "deepseek,deepseek-chat",
+        "priority": 10
+      },
+      {
+        "pattern": "think",
+        "target": "anthropic,claude-3-sonnet",
+        "priority": 10
+      },
+      {
+        "pattern": "gpt-*",
+        "target": "openai",
+        "priority": 5
+      },
+      {
+        "pattern": "claude-*",
+        "target": "anthropic",
+        "priority": 5
+      }
+    ],
+    "fallback": [
+      "openai,gpt-3.5-turbo",
+      "anthropic,claude-3-haiku",
+      "deepseek,deepseek-chat",
+      "openrouter,anthropic/claude-3-sonnet"
+    ]
+  },
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "file": "logs/router.log",
+    "maxSize": "10m",
+    "maxFiles": 5
+  }
+}
