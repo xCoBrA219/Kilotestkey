@@ -1,0 +1,304 @@
+<div class="logs-page">
+    <div class="page-header">
+        <h1>Request-Logs</h1>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="refreshLogs()">
+                <i class="fas fa-sync-alt"></i>
+                Aktualisieren
+            </button>
+            <button class="btn btn-secondary" onclick="clearLogs()">
+                <i class="fas fa-trash"></i>
+                Logs leeren
+            </button>
+            <button class="btn btn-secondary" onclick="downloadLogs()">
+                <i class="fas fa-download"></i>
+                Herunterladen
+            </button>
+        </div>
+    </div>
+
+    <div class="logs-filter">
+        <div class="filter-group">
+            <label for="logLevel">Log-Level:</label>
+            <select id="logLevel" onchange="filterLogs()">
+                <option value="">Alle</option>
+                <option value="info">Info</option>
+                <option value="warn">Warnung</option>
+                <option value="error">Fehler</option>
+                <option value="debug">Debug</option>
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="logProvider">Provider:</label>
+            <select id="logProvider" onchange="filterLogs()">
+                <option value="">Alle</option>
+                <% if (providers && providers.length > 0) { %>
+                    <% providers.forEach(provider => { %>
+                        <option value="<%= provider.name %>"><%= provider.name %></option>
+                    <% }); %>
+                <% } %>
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="logSearch">Suche:</label>
+            <input type="text" id="logSearch" placeholder="Nachricht suchen..." oninput="filterLogs()">
+        </div>
+        
+        <div class="filter-group">
+            <label for="logLimit">Anzahl:</label>
+            <select id="logLimit" onchange="filterLogs()">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="">Alle</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="logs-container">
+        <div class="logs-table-wrapper">
+            <table class="logs-table">
+                <thead>
+                    <tr>
+                        <th>Zeitstempel</th>
+                        <th>Level</th>
+                        <th>Provider</th>
+                        <th>Modell</th>
+                        <th>Request-ID</th>
+                        <th>Nachricht</th>
+                        <th>Tokens</th>
+                        <th>Dauer</th>
+                    </tr>
+                </thead>
+                <tbody id="logsTable">
+                    <% if (logs && logs.length > 0) { %>
+                        <% logs.forEach(log => { %>
+                            <tr class="log-row <%= log.level %>">
+                                <td class="timestamp"><%= log.timestamp %></td>
+                                <td class="level"><span class="level-badge <%= log.level %>"><%= log.level.toUpperCase() %></span></td>
+                                <td class="provider"><%= log.provider || '-' %></td>
+                                <td class="model"><%= log.model || '-' %></td>
+                                <td class="request-id"><%= log.requestId || '-' %></td>
+                                <td class="message"><%= log.message %></td>
+                                <td class="tokens"><%= log.tokens || '-' %></td>
+                                <td class="duration"><%= log.duration ? log.duration + 'ms' : '-' %></td>
+                            </tr>
+                        <% }); %>
+                    <% } else { %>
+                        <tr>
+                            <td colspan="8" class="empty-state">
+                                Keine Logs verfügbar
+                            </td>
+                        </tr>
+                    <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="logs-summary">
+        <div class="summary-grid">
+            <div class="summary-card">
+                <span class="summary-label">Gesamt:</span>
+                <span class="summary-value"><%= stats.totalLogs || 0 %></span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Info:</span>
+                <span class="summary-value info"><%= stats.infoCount || 0 %></span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Warnungen:</span>
+                <span class="summary-value warn"><%= stats.warnCount || 0 %></span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Fehler:</span>
+                <span class="summary-value error"><%= stats.errorCount || 0 %></span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Gesamt-Tokens:</span>
+                <span class="summary-value"><%= stats.totalTokens || 0 %></span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Durchschnittliche Dauer:</span>
+                <span class="summary-value"><%= stats.avgDuration ? stats.avgDuration + 'ms' : '0ms' %></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let allLogs = <%= JSON.stringify(logs || []) %>;
+
+    // Filtert Logs
+    function filterLogs() {
+        const level = document.getElementById('logLevel').value;
+        const provider = document.getElementById('logProvider').value;
+        const search = document.getElementById('logSearch').value.toLowerCase();
+        const limit = document.getElementById('logLimit').value;
+        
+        let filtered = allLogs;
+        
+        // Filter nach Level
+        if (level) {
+            filtered = filtered.filter(log => log.level === level);
+        }
+        
+        // Filter nach Provider
+        if (provider) {
+            filtered = filtered.filter(log => log.provider === provider);
+        }
+        
+        // Filter nach Suche
+        if (search) {
+            filtered = filtered.filter(log => 
+                log.message.toLowerCase().includes(search) ||
+                log.requestId.toLowerCase().includes(search) ||
+                (log.model && log.model.toLowerCase().includes(search)) ||
+                (log.provider && log.provider.toLowerCase().includes(search))
+            );
+        }
+        
+        // Limit
+        if (limit) {
+            filtered = filtered.slice(0, parseInt(limit));
+        }
+        
+        renderLogs(filtered);
+    }
+
+    // Rendert Logs in die Tabelle
+    function renderLogs(logs) {
+        const tbody = document.getElementById('logsTable');
+        
+        if (logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="empty-state">
+                        Keine Logs gefunden
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        let html = '';
+        logs.forEach(log => {
+            html += `
+                <tr class="log-row ${log.level}">
+                    <td class="timestamp">${log.timestamp}</td>
+                    <td class="level"><span class="level-badge ${log.level}">${log.level.toUpperCase()}</span></td>
+                    <td class="provider">${log.provider || '-'}</td>
+                    <td class="model">${log.model || '-'}</td>
+                    <td class="request-id">${log.requestId || '-'}</td>
+                    <td class="message">${log.message}</td>
+                    <td class="tokens">${log.tokens || '-'}</td>
+                    <td class="duration">${log.duration ? log.duration + 'ms' : '-'}</td>
+                </tr>
+            `;
+        });
+        
+        tbody.innerHTML = html;
+    }
+
+    // Aktualisiert Logs
+    function refreshLogs() {
+        fetch('/api/v1/logs')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    allLogs = data.logs;
+                    filterLogs();
+                    showNotification('Logs aktualisiert', 'success');
+                } else {
+                    showNotification(data.error || 'Fehler beim Laden der Logs', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Laden der Logs', 'error');
+            });
+    }
+
+    // Löscht Logs
+    function clearLogs() {
+        if (confirm('Sind Sie sicher, dass Sie alle Logs löschen möchten?')) {
+            fetch('/api/v1/logs', {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    allLogs = [];
+                    renderLogs([]);
+                    showNotification('Logs geleert', 'success');
+                } else {
+                    showNotification(data.error || 'Fehler beim Löschen der Logs', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Löschen der Logs', 'error');
+            });
+        }
+    }
+
+    // Lädt Logs als Datei herunter
+    function downloadLogs() {
+        const level = document.getElementById('logLevel').value;
+        const provider = document.getElementById('logProvider').value;
+        const search = document.getElementById('logSearch').value;
+        
+        let filtered = allLogs;
+        
+        if (level) {
+            filtered = filtered.filter(log => log.level === level);
+        }
+        
+        if (provider) {
+            filtered = filtered.filter(log => log.provider === provider);
+        }
+        
+        if (search) {
+            const searchLower = search.toLowerCase();
+            filtered = filtered.filter(log => 
+                log.message.toLowerCase().includes(searchLower) ||
+                log.requestId.toLowerCase().includes(searchLower)
+            );
+        }
+        
+        const csv = convertToCSV(filtered);
+        downloadCSV(csv, 'ccr-logs.csv');
+    }
+
+    // Konvertiert Logs zu CSV
+    function convertToCSV(logs) {
+        const headers = ['Zeitstempel', 'Level', 'Provider', 'Modell', 'Request-ID', 'Nachricht', 'Tokens', 'Dauer'];
+        const rows = logs.map(log => [
+            log.timestamp,
+            log.level,
+            log.provider || '',
+            log.model || '',
+            log.requestId || '',
+            `"${log.message.replace(/"/g, '""')}"`,
+            log.tokens || '',
+            log.duration ? log.duration + 'ms' : ''
+        ]);
+        
+        return [headers, ...rows].map(row => row.join(',')).join('\n');
+    }
+
+    // Lädt CSV-Datei herunter
+    function downloadCSV(csv, filename) {
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // Initialer Filter
+    filterLogs();
+</script>

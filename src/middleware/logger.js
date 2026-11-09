@@ -1,13 +1,12 @@
 /**
  * Cloud Code Router - Logger
  * 
- * Centralisiertes Logging-System
+ * Centralisiertes Logging-System mit Winston
  */
 
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
 const path = require('path');
-const { format, transports, createLogger } = winston;
 
 // Logger-Instanz
 let logger;
@@ -27,43 +26,29 @@ function createAppLogger(config = {}) {
   } = config;
   
   if (!enabled) {
-    return createLogger({
+    return winston.createLogger({
       level: 'silent',
-      transports: [new transports.Console()]
+      transports: [new winston.transports.Console()]
     });
   }
   
-  // Formatierung
-  const logFormat = format.combine(
-    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    format.errors({ stack: true }),
-    format.splat(),
-    format.json()
-  );
-  
-  const consoleFormat = format.combine(
-    format.colorize(),
-    format.timestamp({ format: 'HH:mm:ss' }),
-    format.printf(({ level, message, timestamp, stack, ...meta }) => {
-      let logMessage = `[${timestamp}] ${level}: ${message}`;
-      
-      if (Object.keys(meta).length > 0) {
-        logMessage += ` ${JSON.stringify(meta)}`;
-      }
-      
-      if (stack) {
-        logMessage += `\n${stack}`;
-      }
-      
-      return logMessage;
-    })
-  );
-  
   // Transports
   const transportsList = [
-    new transports.Console({
+    new winston.transports.Console({
       level,
-      format: consoleFormat
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.timestamp({ format: 'HH:mm:ss' }),
+        winston.format.printf(({ level, message, timestamp, ...meta }) => {
+          let logMessage = `[${timestamp}] ${level}: ${message}`;
+          
+          if (Object.keys(meta).length > 0) {
+            logMessage += ` ${JSON.stringify(meta)}`;
+          }
+          
+          return logMessage;
+        })
+      )
     })
   ];
   
@@ -84,15 +69,17 @@ function createAppLogger(config = {}) {
         maxSize,
         maxFiles,
         level,
-        format: logFormat
+        format: winston.format.combine(
+          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          winston.format.json()
+        )
       })
     );
   }
   
   // Logger erstellen
-  return createLogger({
+  return winston.createLogger({
     level,
-    format: logFormat,
     transports: transportsList,
     exitOnError: false
   });
@@ -107,17 +94,21 @@ function initLogger(config = {}) {
   
   // Globalen Logger für unhandled Exceptions
   logger.exceptions.handle(
-    new transports.Console(),
-    new transports.File({ filename: 'logs/exceptions.log' })
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'logs/exceptions.log' })
   );
   
   // Globalen Logger für unhandled Promise Rejections
   process.on('unhandledRejection', (reason, promise) => {
-    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    if (logger) {
+      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    }
   });
   
   process.on('uncaughtException', (error) => {
-    logger.error('Uncaught Exception:', error);
+    if (logger) {
+      logger.error('Uncaught Exception:', error);
+    }
     process.exit(1);
   });
 }
@@ -130,45 +121,30 @@ function requestLogger(req, res, next) {
   const start = Date.now();
   
   // Request-Start loggen
-  logger.info('Request gestartet', {
-    method: req.method,
-    path: req.path,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+  if (logger) {
+    logger.info('Request gestartet', {
+      method: req.method,
+      path: req.path,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
+  }
   
   // Response-Ende loggen
   res.on('finish', () => {
     const duration = Date.now() - start;
-    logger.info('Request abgeschlossen', {
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      duration: `${duration}ms`,
-      ip: req.ip
-    });
+    if (logger) {
+      logger.info('Request abgeschlossen', {
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        duration: `${duration}ms`,
+        ip: req.ip
+      });
+    }
   });
   
   next();
-}
-
-/**
- * Error-Logger
- * @param {Error} error - Fehler
- * @param {string} context - Kontext
- */
-function errorLogger(error, context = '') {
-  if (context) {
-    logger.error(`${context}: ${error.message}`, {
-      error: error.stack,
-      ...error
-    });
-  } else {
-    logger.error(error.message, {
-      error: error.stack,
-      ...error
-    });
-  }
 }
 
 // Standard-Logger initialisieren
@@ -179,7 +155,5 @@ if (!logger) {
 module.exports = {
   logger,
   initLogger,
-  requestLogger,
-  errorLogger,
-  createAppLogger
+  requestLogger
 };

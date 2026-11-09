@@ -16,17 +16,18 @@ let rateLimiter;
  */
 function initRateLimiter(config = {}) {
   const {
-    requestsPerMinute = 100,
-    requestsPerSecond = null
+    requestsPerMinute = 100
   } = config;
   
   // Rate-Limiter erstellen
   rateLimiter = new RateLimiterMemory({
     points: requestsPerMinute,
-    duration: 60, // 60 Sekunden = 1 Minute
+    duration: 60 // 60 Sekunden = 1 Minute
   });
   
-  logger.info(`⏱️ Rate-Limiter initialisiert: ${requestsPerMinute} Requests/Minute`);
+  if (logger) {
+    logger.info(`⏱️ Rate-Limiter initialisiert: ${requestsPerMinute} Requests/Minute`);
+  }
 }
 
 /**
@@ -57,49 +58,16 @@ function rateLimitMiddleware(config = {}) {
       
     } catch (error) {
       // Rate-Limit überschritten
-      logger.warn('Rate-Limit überschritten', {
-        ip: req.ip,
-        path: req.path
-      });
+      if (logger) {
+        logger.warn('Rate-Limit überschritten', {
+          ip: req.ip,
+          path: req.path
+        });
+      }
       
       return res.status(429).json({
         error: {
           message: 'Rate-Limit überschritten. Bitte versuchen Sie es später erneut.',
-          type: 'rate_limit_exceeded',
-          code: 429,
-          retryAfter: error.msBeforeNext ? Math.ceil(error.msBeforeNext / 1000) : 60
-        }
-      });
-    }
-  };
-}
-
-/**
- * Erstellt eine Rate-Limit-Middleware pro API-Schlüssel
- * @param {Object} config - Rate-Limit-Konfiguration
- * @returns {Function} Express-Middleware
- */
-function rateLimitPerKeyMiddleware(config = {}) {
-  const rateLimiter = new RateLimiterMemory({
-    points: config.requestsPerMinute || 100,
-    duration: 60,
-  });
-  
-  return async (req, res, next) => {
-    try {
-      // API-Schlüssel aus Headers extrahieren
-      const authHeader = req.headers.authorization || req.headers.Authorization;
-      const apiKey = authHeader ? authHeader.substring(7) : 'anonymous';
-      
-      // Rate-Limit prüfen
-      await rateLimiter.consume(apiKey);
-      
-      return next();
-      
-    } catch (error) {
-      return res.status(429).json({
-        error: {
-          message: 'Rate-Limit für diesen API-Schlüssel überschritten.',
           type: 'rate_limit_exceeded',
           code: 429,
           retryAfter: error.msBeforeNext ? Math.ceil(error.msBeforeNext / 1000) : 60
@@ -115,7 +83,9 @@ function rateLimitPerKeyMiddleware(config = {}) {
 function resetRateLimiter() {
   if (rateLimiter) {
     rateLimiter.deleteAll();
-    logger.info('⏱️ Rate-Limiter zurückgesetzt');
+    if (logger) {
+      logger.info('⏱️ Rate-Limiter zurückgesetzt');
+    }
   }
 }
 
@@ -140,7 +110,6 @@ initRateLimiter();
 
 module.exports = {
   rateLimitMiddleware,
-  rateLimitPerKeyMiddleware,
   initRateLimiter,
   resetRateLimiter,
   getRateLimiterStatus

@@ -1,0 +1,198 @@
+<div class="dashboard">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon total-requests">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-value"><%= stats.totalRequests || 0 %></span>
+                <span class="stat-label">Gesamtanfragen</span>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon active-providers">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-value"><%= stats.activeProviders || 0 %></span>
+                <span class="stat-label">Aktive Provider</span>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon total-tokens">
+                <i class="fas fa-coins"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-value"><%= stats.totalTokens || 0 %></span>
+                <span class="stat-label">Gesamt-Tokens</span>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon uptime">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="stat-info">
+                <span class="stat-value"><%= stats.uptime || '0' %>s</span>
+                <span class="stat-label">Betriebszeit</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="content-grid">
+        <!-- Provider Status -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Provider-Status</h2>
+                <a href="/providers" class="btn btn-small">Alle anzeigen</a>
+            </div>
+            <div class="card-body">
+                <div class="provider-list">
+                    <% if (providers && providers.length > 0) { %>
+                        <% providers.forEach(provider => { %>
+                            <div class="provider-item">
+                                <div class="provider-info">
+                                    <span class="provider-name"><%= provider.name %></span>
+                                    <span class="provider-models"><%= provider.models.length %> Modelle</span>
+                                </div>
+                                <div class="provider-status">
+                                    <span class="status-badge <%= provider.available ? 'online' : 'offline' %>">
+                                        <%= provider.available ? 'Online' : 'Offline' %>
+                                    </span>
+                                    <span class="status-badge <%= provider.enabled ? 'enabled' : 'disabled' %>">
+                                        <%= provider.enabled ? 'Aktiv' : 'Inaktiv' %>
+                                    </span>
+                                </div>
+                            </div>
+                        <% }); %>
+                    <% } else { %>
+                        <p class="empty-state">Keine Provider konfiguriert</p>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Aktuelle Aktivität</h2>
+                <a href="/logs" class="btn btn-small">Alle Logs</a>
+            </div>
+            <div class="card-body">
+                <div class="activity-list">
+                    <% if (activity && activity.length > 0) { %>
+                        <% activity.slice(0, 5).forEach(item => { %>
+                            <div class="activity-item">
+                                <div class="activity-icon">
+                                    <i class="fas fa-<%= item.type === 'request' ? 'arrow-right' : item.type === 'error' ? 'exclamation-triangle' : 'info-circle' %>"></i>
+                                </div>
+                                <div class="activity-content">
+                                    <span class="activity-message"><%= item.message %></span>
+                                    <span class="activity-time"><%= item.timestamp %></span>
+                                </div>
+                            </div>
+                        <% }); %>
+                    <% } else { %>
+                        <p class="empty-state">Keine aktuelle Aktivität</p>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Schnellaktionen</h2>
+            </div>
+            <div class="card-body">
+                <div class="quick-actions">
+                    <button class="btn btn-primary" onclick="testConnection()">
+                        <i class="fas fa-plug"></i>
+                        Verbindung testen
+                    </button>
+                    <button class="btn btn-secondary" onclick="refreshStats()">
+                        <i class="fas fa-sync-alt"></i>
+                        Statistiken aktualisieren
+                    </button>
+                    <button class="btn btn-secondary" onclick="clearCache()">
+                        <i class="fas fa-trash"></i>
+                        Cache leeren
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Info -->
+        <div class="card">
+            <div class="card-header">
+                <h2>System-Informationen</h2>
+            </div>
+            <div class="card-body">
+                <div class="system-info">
+                    <div class="info-row">
+                        <span class="info-label">Server-Port:</span>
+                        <span class="info-value"><%= server.port || 3000 %></span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Node.js-Version:</span>
+                        <span class="info-value"><%= server.nodeVersion || 'Unbekannt' %></span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">API-Endpunkt:</span>
+                        <span class="info-value">/api/v1/chat/completions</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Dokumentation:</span>
+                        <span class="info-value"><a href="https://github.com/xCoBrA219/Kilotestkey" target="_blank">GitHub</a></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Aktualisiert Statistiken
+    function refreshStats() {
+        fetch('/api/v1/stats')
+            .then(response => response.json())
+            .then(data => {
+                location.reload();
+            })
+            .catch(error => {
+                showNotification('Fehler beim Aktualisieren der Statistiken', 'error');
+            });
+    }
+
+    // Testet Verbindung zu allen Providern
+    function testConnection() {
+        fetch('/api/v1/providers/test')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Alle Provider-Verbindungen OK', 'success');
+                } else {
+                    showNotification('Einige Provider nicht erreichbar', 'warning');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Testen der Verbindungen', 'error');
+            });
+    }
+
+    // Leert den Cache
+    function clearCache() {
+        fetch('/api/v1/cache/clear', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                showNotification('Cache geleert', 'success');
+            })
+            .catch(error => {
+                showNotification('Fehler beim Leeren des Caches', 'error');
+            });
+    }
+</script>

@@ -1,0 +1,358 @@
+<div class="providers-page">
+    <div class="page-header">
+        <h1>Provider-Verwaltung</h1>
+        <button class="btn btn-primary" onclick="openAddProviderModal()">
+            <i class="fas fa-plus"></i>
+            Provider hinzufügen
+        </button>
+    </div>
+
+    <div class="providers-grid">
+        <% if (providers && providers.length > 0) { %>
+            <% providers.forEach(provider => { %>
+                <div class="provider-card">
+                    <div class="provider-card-header">
+                        <div class="provider-card-title">
+                            <span class="provider-icon"><%= getProviderIcon(provider.name) %></span>
+                            <h3><%= provider.name %></h3>
+                        </div>
+                        <div class="provider-card-actions">
+                            <button class="btn-icon" onclick="toggleProvider('<%= provider.name %>', <%= provider.enabled %>)" title="<%= provider.enabled ? 'Deaktivieren' : 'Aktivieren' %>">
+                                <i class="fas fa-<%= provider.enabled ? 'pause' : 'play' %>"></i>
+                            </button>
+                            <button class="btn-icon" onclick="editProvider('<%= provider.name %>')" title="Bearbeiten">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-icon btn-danger" onclick="deleteProvider('<%= provider.name %>')" title="Löschen">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="provider-card-body">
+                        <div class="provider-detail">
+                            <span class="detail-label">Base URL:</span>
+                            <span class="detail-value"><%= provider.baseUrl %></span>
+                        </div>
+                        <div class="provider-detail">
+                            <span class="detail-label">API-Schlüssel:</span>
+                            <span class="detail-value"><%= provider.hasApiKey ? '✓ Gesetzt' : '✗ Nicht gesetzt' %></span>
+                        </div>
+                        <div class="provider-detail">
+                            <span class="detail-label">Modelle:</span>
+                            <span class="detail-value"><%= provider.models.join(', ') %></span>
+                        </div>
+                        <div class="provider-detail">
+                            <span class="detail-label">Timeout:</span>
+                            <span class="detail-value"><%= provider.timeout || 30000 %>ms</span>
+                        </div>
+                        <div class="provider-detail">
+                            <span class="detail-label">Max Retries:</span>
+                            <span class="detail-value"><%= provider.maxRetries || 3 %></span>
+                        </div>
+                    </div>
+                    
+                    <div class="provider-card-footer">
+                        <div class="status-indicator">
+                            <span class="status-dot <%= provider.available ? 'online' : 'offline' %>"></span>
+                            <span><%= provider.available ? 'Online' : 'Offline' %></span>
+                        </div>
+                        <button class="btn btn-small" onclick="testProvider('<%= provider.name %>')">
+                            <i class="fas fa-plug"></i>
+                            Testen
+                        </button>
+                    </div>
+                </div>
+            <% }); %>
+        <% } else { %>
+            <div class="empty-state-card">
+                <i class="fas fa-server"></i>
+                <h3>Keine Provider konfiguriert</h3>
+                <p>Fügen Sie einen Provider hinzu, um zu beginnen.</p>
+                <button class="btn btn-primary" onclick="openAddProviderModal()">
+                    <i class="fas fa-plus"></i>
+                    Provider hinzufügen
+                </button>
+            </div>
+        <% } %>
+    </div>
+
+    <!-- Provider Test Results Modal -->
+    <div id="testModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Verbindungstest</h2>
+                <button class="btn-close" onclick="closeTestModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="testResults">
+                <!-- Test results will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeTestModal()">Schließen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Provider Modal -->
+    <div id="providerModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="modalTitle">Provider hinzufügen</h2>
+                <button class="btn-close" onclick="closeProviderModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="providerForm" onsubmit="saveProvider(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="providerName">Provider-Name *</label>
+                        <select id="providerName" required>
+                            <option value="">-- Provider auswählen --</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="ollama">Ollama (lokal)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="providerBaseUrl">Base URL *</label>
+                        <input type="url" id="providerBaseUrl" required placeholder="https://api.openai.com/v1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="providerApiKey">API-Schlüssel</label>
+                        <input type="password" id="providerApiKey" placeholder="sk-...">
+                        <small>Lassen Sie leer, wenn kein API-Schlüssel benötigt wird (z.B. für Ollama)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="providerModels">Modelle</label>
+                        <textarea id="providerModels" rows="3" placeholder="gpt-4, gpt-3.5-turbo (kommagetrennt)"></textarea>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="providerTimeout">Timeout (ms)</label>
+                            <input type="number" id="providerTimeout" value="30000" min="1000">
+                        </div>
+                        <div class="form-group">
+                            <label for="providerMaxRetries">Max Retries</label>
+                            <input type="number" id="providerMaxRetries" value="3" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="providerEnabled" checked>
+                            Aktiviert
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeProviderModal()">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentProvider = null;
+
+    // Öffnet das Modal zum Hinzufügen eines Providers
+    function openAddProviderModal() {
+        currentProvider = null;
+        document.getElementById('modalTitle').textContent = 'Provider hinzufügen';
+        document.getElementById('providerForm').reset();
+        document.getElementById('providerModal').style.display = 'block';
+    }
+
+    // Bearbeitet einen Provider
+    function editProvider(providerName) {
+        currentProvider = providerName;
+        document.getElementById('modalTitle').textContent = 'Provider bearbeiten';
+        
+        // Provider-Daten laden
+        fetch(`/api/v1/providers/${providerName}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('providerName').value = data.name;
+                document.getElementById('providerBaseUrl').value = data.baseUrl;
+                document.getElementById('providerApiKey').value = data.apiKey || '';
+                document.getElementById('providerModels').value = data.models.join(', ');
+                document.getElementById('providerTimeout').value = data.timeout || 30000;
+                document.getElementById('providerMaxRetries').value = data.maxRetries || 3;
+                document.getElementById('providerEnabled').checked = data.enabled !== false;
+                
+                document.getElementById('providerModal').style.display = 'block';
+            })
+            .catch(error => {
+                showNotification('Fehler beim Laden des Providers', 'error');
+            });
+    }
+
+    // Schließt das Provider-Modal
+    function closeProviderModal() {
+        document.getElementById('providerModal').style.display = 'none';
+        currentProvider = null;
+    }
+
+    // Speichert einen Provider
+    function saveProvider(event) {
+        event.preventDefault();
+        
+        const name = document.getElementById('providerName').value;
+        const baseUrl = document.getElementById('providerBaseUrl').value;
+        const apiKey = document.getElementById('providerApiKey').value;
+        const models = document.getElementById('providerModels').value.split(',').map(m => m.trim()).filter(m => m);
+        const timeout = parseInt(document.getElementById('providerTimeout').value) || 30000;
+        const maxRetries = parseInt(document.getElementById('providerMaxRetries').value) || 3;
+        const enabled = document.getElementById('providerEnabled').checked;
+        
+        const providerData = {
+            baseUrl,
+            apiKey: apiKey || undefined,
+            models,
+            timeout,
+            maxRetries,
+            enabled
+        };
+        
+        const url = currentProvider 
+            ? `/api/v1/providers/${currentProvider}` 
+            : `/api/v1/providers/${name}`;
+        const method = currentProvider ? 'PUT' : 'POST';
+        
+        fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(providerData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(`Provider ${currentProvider ? 'aktualisiert' : 'hinzugefügt'}`, 'success');
+                closeProviderModal();
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showNotification(data.error || 'Fehler beim Speichern', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Speichern des Providers', 'error');
+        });
+    }
+
+    // Löscht einen Provider
+    function deleteProvider(providerName) {
+        if (confirm(`Sind Sie sicher, dass Sie den Provider "${providerName}" löschen möchten?`)) {
+            fetch(`/api/v1/providers/${providerName}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Provider gelöscht', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showNotification(data.error || 'Fehler beim Löschen', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Löschen des Providers', 'error');
+            });
+        }
+    }
+
+    // Aktiviert/Deaktiviert einen Provider
+    function toggleProvider(providerName, currentlyEnabled) {
+        const newStatus = !currentlyEnabled;
+        
+        fetch(`/api/v1/providers/${providerName}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled: newStatus })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(`Provider ${newStatus ? 'aktiviert' : 'deaktiviert'}`, 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showNotification(data.error || 'Fehler beim Ändern des Status', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Ändern des Provider-Status', 'error');
+        });
+    }
+
+    // Testet einen Provider
+    function testProvider(providerName) {
+        document.getElementById('testResults').innerHTML = '<p>Teste Verbindung zu ' + providerName + '...</p>';
+        document.getElementById('testModal').style.display = 'block';
+        
+        fetch(`/api/v1/providers/${providerName}/test`)
+            .then(response => response.json())
+            .then(data => {
+                let html = '';
+                
+                if (data.success) {
+                    html = `
+                        <div class="test-success">
+                            <i class="fas fa-check-circle"></i>
+                            <h3>Verbindung erfolgreich!</h3>
+                            <p>Provider "${providerName}" ist erreichbar und funktioniert korrekt.</p>
+                        </div>
+                    `;
+                } else {
+                    html = `
+                        <div class="test-error">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Verbindungsfehler</h3>
+                            <p>Provider "${providerName}" ist nicht erreichbar:</p>
+                            <pre>${data.error || 'Unbekannter Fehler'}</pre>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('testResults').innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('testResults').innerHTML = `
+                    <div class="test-error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <h3>Fehler beim Testen</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            });
+    }
+
+    // Schließt das Test-Modal
+    function closeTestModal() {
+        document.getElementById('testModal').style.display = 'none';
+    }
+
+    // Hilfsfunktion für Provider-Icons
+    function getProviderIcon(name) {
+        const icons = {
+            openai: 'fa-robot',
+            anthropic: 'fa-brain',
+            deepseek: 'fa-search',
+            openrouter: 'fa-route',
+            ollama: 'fa-cube'
+        };
+        return icons[name] || 'fa-server';
+    }
+</script>

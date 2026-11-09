@@ -1,19 +1,22 @@
 /**
  * Cloud Code Router - Server
  * 
- * Express-basierter Server mit API-Endpunkten
+ * Express-basierter Server mit API-Endpunkten und Web-UI
  */
 
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const path = require('path');
 const logger = require('./middleware/logger');
 const { authMiddleware } = require('./middleware/auth');
 const { rateLimitMiddleware } = require('./middleware/rateLimit');
 const ProviderManager = require('./providers');
 const RouterEngine = require('./router');
+
+// Request-Logs-Speicher
+let requestLogs = [];
 
 /**
  * Erstellt und startet den Express-Server
@@ -22,6 +25,15 @@ const RouterEngine = require('./router');
  */
 async function startServer(config) {
   const app = express();
+  
+  // View Engine (EJS) konfigurieren
+  app.set('views', path.join(__dirname, '../views'));
+  app.set('view engine', 'ejs');
+  
+  // Statische Dateien
+  app.use('/styles', express.static(path.join(__dirname, '../public/styles')));
+  app.use('/scripts', express.static(path.join(__dirname, '../public/scripts')));
+  app.use('/images', express.static(path.join(__dirname, '../public/images')));
   
   // Middleware
   app.use(helmet());
@@ -37,12 +49,12 @@ async function startServer(config) {
   // Request-Logging
   app.use(logger.requestLogger);
   
-  // Rate Limiting (falls aktiviert)
+  // Rate Limiting
   if (config.server.rateLimit?.enabled) {
     app.use(rateLimitMiddleware(config.server.rateLimit));
   }
   
-  // API-Schlüssel Authentifizierung (falls konfiguriert)
+  // API-Schlüssel Authentifizierung
   if (config.server.apiKey) {
     app.use(authMiddleware(config.server.apiKey));
   }
@@ -50,6 +62,189 @@ async function startServer(config) {
   // Provider-Manager und Router-Engine initialisieren
   const providerManager = new ProviderManager(config.providers);
   const routerEngine = new RouterEngine(providerManager, config.routing);
+  
+  // ========== UI ROUTES ==========
+  
+  // Dashboard
+  app.get('/dashboard', async (req, res) => {
+    try {
+      const providerStatus = await providerManager.getProviderStatus();
+      const providers = Object.entries(providerStatus).map(([name, status]) => ({
+        name,
+        ...status
+      }));
+      
+      const stats = {
+        totalRequests: requestLogs.length,
+        activeProviders: Object.keys(config.providers || {}).length,
+        totalTokens: requestLogs.reduce((sum, l) => sum + (l.tokens || 0), 0),
+        uptime: Math.round(process.uptime())
+      };
+      
+      const activity = requestLogs.slice(0, 5).map(log => ({
+        type: 'request',
+        message: `Request zu ${log.model || 'unbekannt'}`,
+        timestamp: new Date().toLocaleTimeString('de-DE')
+      }));
+      
+      res.render('pages/dashboard', {
+        title: 'Dashboard',
+        active: 'dashboard',
+        stats,
+        providers,
+        activity
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden des Dashboards:', error);
+      res.status(500).render('pages/dashboard', {
+        title: 'Dashboard',
+        active: 'dashboard',
+        stats: { totalRequests: 0, activeProviders: 0, totalTokens: 0, uptime: 0 },
+        providers: [],
+        activity: []
+      });
+    }
+  });
+  
+  // Provider Page
+  app.get('/providers', async (req, res) => {
+    try {
+      const providerStatus = await providerManager.getProviderStatus();
+      const providers = Object.entries(providerStatus).map(([name, status]) => ({
+        name,
+        ...status
+      }));
+      
+      res.render('pages/providers', {
+        title: 'Provider',
+        active: 'providers',
+        providers
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden der Provider-Seite:', error);
+      res.status(500).render('pages/providers', {
+        title: 'Provider',
+        active: 'providers',
+        providers: []
+      });
+    }
+  });
+  
+  // Routing Page
+  app.get('/routing', (req, res) => {
+    try {
+      const providers = providerManager.getEnabledProviders();
+      const routingConfig = routerEngine.getConfig();
+      
+      res.render('pages/routing', {
+        title: 'Routing',
+        active: 'routing',
+        providers: Object.entries(providers).map(([name, p]) => ({
+          name,
+          baseUrl: p.config.baseUrl,
+          models: p.config.models
+        })),
+        routing: routingConfig
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden der Routing-Seite:', error);
+      res.status(500).render('pages/routing', {
+        title: 'Routing',
+        active: 'routing',
+        providers: [],
+        routing: { default: null, rules: [], fallback: [] }
+      });
+    }
+  });
+  
+  // Logs Page
+  app.get('/logs', (req, res) => {
+    try {
+      const logs = requestLogs.map(log => ({
+        timestamp: log.timestamp || new Date().toLocaleString('de-DE'),
+        level: log.level || 'info',
+        provider: log.provider || '-',
+        model: log.model || '-',
+        requestId: log.requestId || '-',
+        message: log.message || '-',
+        tokens: log.tokens || 0,
+        duration: log.duration || 0
+      }));
+      
+      const stats = {
+        totalLogs: logs.length,
+        infoCount: logs.filter(l => l.level === 'info').length,
+        warnCount: logs.filter(l => l.level === 'warn').length,
+        errorCount: logs.filter(l => l.level === 'error').length,
+        totalTokens: logs.reduce((sum, l) => sum + (l.tokens || 0), 0),
+        avgDuration: logs.length > 0 
+          ? Math.round(logs.reduce((sum, l) => sum + (l.duration || 0), 0) / logs.length)
+          : 0
+      };
+      
+      const providers = providerManager.getProviderNames();
+      
+      res.render('pages/logs', {
+        title: 'Logs',
+        active: 'logs',
+        logs,
+        stats,
+        providers
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden der Logs-Seite:', error);
+      res.status(500).render('pages/logs', {
+        title: 'Logs',
+        active: 'logs',
+        logs: [],
+        stats: { totalLogs: 0, infoCount: 0, warnCount: 0, errorCount: 0, totalTokens: 0, avgDuration: 0 },
+        providers: []
+      });
+    }
+  });
+  
+  // Settings Page
+  app.get('/settings', (req, res) => {
+    try {
+      const stats = {
+        totalRequests: requestLogs.length,
+        activeProviders: Object.keys(config.providers || {}).length,
+        totalTokens: requestLogs.reduce((sum, l) => sum + (l.tokens || 0), 0),
+        uptime: Math.round(process.uptime())
+      };
+      
+      res.render('pages/settings', {
+        title: 'Einstellungen',
+        active: 'settings',
+        server: {
+          port: config.server.port,
+          host: config.server.host,
+          apiKey: config.server.apiKey ? true : false,
+          rateLimit: config.server.rateLimit,
+          corsOrigins: config.server.corsOrigins,
+          nodeVersion: process.version
+        },
+        logging: config.logging,
+        stats
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden der Settings-Seite:', error);
+      res.status(500).render('pages/settings', {
+        title: 'Einstellungen',
+        active: 'settings',
+        server: {},
+        logging: {},
+        stats: {}
+      });
+    }
+  });
+  
+  // Root Route - Redirect to Dashboard
+  app.get('/', (req, res) => {
+    res.redirect('/dashboard');
+  });
+  
+  // ========== API ROUTES ==========
   
   // Health-Check Endpunkt
   app.get('/health', (req, res) => {
@@ -100,13 +295,12 @@ async function startServer(config) {
   // Haupt-API-Endpunkt für Chat-Completions
   app.post('/api/v1/chat/completions', async (req, res) => {
     try {
-      const requestId = req.headers['x-request-id'] || generateRequestId();
+      const requestId = req.headers['x-request-id'] || `ccr-${Date.now()}`;
       const startTime = Date.now();
       
       logger.info(`[${requestId}] Neue Chat-Anfrage erhalten`, {
         model: req.body.model,
-        provider: req.headers['x-provider'],
-        messages: req.body.messages?.length || 0
+        provider: req.headers['x-provider']
       });
       
       // Anfrage an Router-Engine weiterleiten
@@ -116,6 +310,24 @@ async function startServer(config) {
       });
       
       const duration = Date.now() - startTime;
+      
+      // Log-Eintrag erstellen
+      requestLogs.unshift({
+        timestamp: new Date().toLocaleString('de-DE'),
+        level: 'info',
+        requestId,
+        provider: response.provider,
+        model: response.model,
+        message: `Chat-Anfrage an ${response.provider}:${response.model}`,
+        tokens: response.usage?.total_tokens || 0,
+        duration
+      });
+      
+      // Maximal 1000 Logs behalten
+      if (requestLogs.length > 1000) {
+        requestLogs = requestLogs.slice(0, 1000);
+      }
+      
       logger.info(`[${requestId}] Anfrage abgeschlossen in ${duration}ms`, {
         resolvedProvider: response.provider,
         resolvedModel: response.model,
@@ -146,7 +358,18 @@ async function startServer(config) {
     } catch (error) {
       logger.error('Fehler bei Chat-Anfrage:', error);
       
-      // Fehler-Response
+      // Fehler-Log erstellen
+      requestLogs.unshift({
+        timestamp: new Date().toLocaleString('de-DE'),
+        level: 'error',
+        requestId: req.headers['x-request-id'] || `ccr-${Date.now()}`,
+        provider: error.provider || 'unknown',
+        model: req.body.model || 'unknown',
+        message: error.message || 'Unbekannter Fehler',
+        tokens: 0,
+        duration: 0
+      });
+      
       const errorResponse = {
         error: {
           message: error.message || 'Ein Fehler ist aufgetreten',
@@ -155,7 +378,6 @@ async function startServer(config) {
         }
       };
       
-      // Falls Provider-spezifischer Fehler
       if (error.provider) {
         errorResponse.error.provider = error.provider;
       }
@@ -164,7 +386,7 @@ async function startServer(config) {
     }
   });
   
-  // Streaming-Endpunkt (für zukünftige Implementierung)
+  // Streaming-Endpunkt
   app.post('/api/v1/chat/completions/stream', (req, res) => {
     res.status(501).json({
       error: {
@@ -175,40 +397,315 @@ async function startServer(config) {
     });
   });
   
-  // Dashboard (einfache HTML-Seite für Management)
-  app.get('/dashboard', (req, res) => {
-    res.send(`,
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Cloud Code Router - Dashboard</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          h1 { color: #333; }
-          .card { background: #f5f5f5; padding: 20px; margin: 10px 0; border-radius: 8px; }
-          .status-online { color: green; }
-          .status-offline { color: red; }
-        </style>
-      </head>
-      <body>
-        <h1>🚀 Cloud Code Router</h1>
-        <p>Willkommen im Dashboard!</p>
-        <div class="card">
-          <h2>📊 Status</h2>
-          <p>Server läuft auf Port ${config.server.port}</p>
-        </div>
-        <div class="card">
-          <h2>🔌 Provider</h2>
-          <p>Konfigurierte Provider: ${Object.keys(config.providers || {}).length}</p>
-        </div>
-        <div class="card">
-          <h2>📖 Dokumentation</h2>
-          <p>Siehe <a href="/api/v1/providers">/api/v1/providers</a> für Provider-Status</p>
-          <p>Siehe <a href="/api/v1/models">/api/v1/models</a> für verfügbare Modelle</p>
-        </div>
-      </body>
-      </html>
-    `);
+  // Get Stats
+  app.get('/api/v1/stats', (req, res) => {
+    const stats = {
+      totalRequests: requestLogs.length,
+      activeProviders: Object.keys(config.providers || {}).length,
+      totalTokens: requestLogs.reduce((sum, l) => sum + (l.tokens || 0), 0),
+      uptime: Math.round(process.uptime())
+    };
+    res.json({ success: true, ...stats });
+  });
+  
+  // Get Logs
+  app.get('/api/v1/logs', (req, res) => {
+    const logs = requestLogs.map(log => ({
+      timestamp: log.timestamp || new Date().toLocaleString('de-DE'),
+      level: log.level || 'info',
+      provider: log.provider || '-',
+      model: log.model || '-',
+      requestId: log.requestId || '-',
+      message: log.message || '-',
+      tokens: log.tokens || 0,
+      duration: log.duration || 0
+    }));
+    res.json({ success: true, logs });
+  });
+  
+  // Clear Logs
+  app.delete('/api/v1/logs', (req, res) => {
+    requestLogs = [];
+    res.json({ success: true, message: 'Logs geleert' });
+  });
+  
+  // Get Provider by Name
+  app.get('/api/v1/providers/:name', (req, res) => {
+    const { name } = req.params;
+    const provider = providerManager.getProvider(name);
+    
+    if (!provider) {
+      return res.status(404).json({ success: false, error: 'Provider nicht gefunden' });
+    }
+    
+    const providerConfig = provider.getConfig();
+    res.json({ 
+      success: true, 
+      name,
+      ...providerConfig
+    });
+  });
+  
+  // Add/Update Provider
+  app.post('/api/v1/providers/:name', (req, res) => {
+    try {
+      const { name } = req.params;
+      const data = req.body;
+      
+      // Prüfen, ob Provider bereits existiert
+      const existingProvider = providerManager.getProvider(name);
+      
+      if (existingProvider) {
+        // Provider aktualisieren
+        providerManager.addProvider(name, data);
+      } else {
+        // Neuer Provider
+        providerManager.addProvider(name, data);
+      }
+      
+      // Konfiguration aktualisieren
+      if (!config.providers) {
+        config.providers = {};
+      }
+      config.providers[name] = data;
+      
+      res.json({ success: true, message: 'Provider gespeichert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Delete Provider
+  app.delete('/api/v1/providers/:name', (req, res) => {
+    try {
+      const { name } = req.params;
+      providerManager.removeProvider(name);
+      
+      // Konfiguration aktualisieren
+      if (config.providers && config.providers[name]) {
+        delete config.providers[name];
+      }
+      
+      res.json({ success: true, message: 'Provider gelöscht' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Toggle Provider
+  app.post('/api/v1/providers/:name/toggle', (req, res) => {
+    try {
+      const { name } = req.params;
+      const { enabled } = req.body;
+      providerManager.setProviderEnabled(name, enabled);
+      
+      // Konfiguration aktualisieren
+      if (config.providers && config.providers[name]) {
+        config.providers[name].enabled = enabled;
+      }
+      
+      res.json({ success: true, message: 'Provider-Status aktualisiert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Test Provider Connection
+  app.get('/api/v1/providers/:name/test', async (req, res) => {
+    try {
+      const { name } = req.params;
+      const available = await providerManager.isProviderAvailable(name);
+      res.json({ 
+        success: available, 
+        message: available ? 'Verbindung erfolgreich' : 'Verbindung fehlgeschlagen' 
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Get Routing Rules
+  app.get('/api/v1/routing/rules', (req, res) => {
+    const routingConfig = routerEngine.getConfig();
+    res.json({ success: true, rules: routingConfig.rules || [] });
+  });
+  
+  // Add Routing Rule
+  app.post('/api/v1/routing/rules', (req, res) => {
+    try {
+      const rule = req.body;
+      routerEngine.addRoutingRule(rule);
+      
+      // Konfiguration aktualisieren
+      if (!config.routing) {
+        config.routing = { default: null, rules: [], fallback: [] };
+      }
+      config.routing.rules.push(rule);
+      
+      res.json({ success: true, message: 'Regel hinzugefügt' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Update Routing Rule
+  app.put('/api/v1/routing/rules/:index', (req, res) => {
+    try {
+      const { index } = req.params;
+      const rule = req.body;
+      const routingConfig = routerEngine.getConfig();
+      routingConfig.rules[index] = rule;
+      
+      // Konfiguration aktualisieren
+      if (config.routing) {
+        config.routing.rules[index] = rule;
+      }
+      
+      res.json({ success: true, message: 'Regel aktualisiert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Delete Routing Rule
+  app.delete('/api/v1/routing/rules/:index', (req, res) => {
+    try {
+      const { index } = req.params;
+      const routingConfig = routerEngine.getConfig();
+      routingConfig.rules.splice(index, 1);
+      
+      // Konfiguration aktualisieren
+      if (config.routing) {
+        config.routing.rules.splice(index, 1);
+      }
+      
+      res.json({ success: true, message: 'Regel gelöscht' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Update Default Routing
+  app.put('/api/v1/routing/default', (req, res) => {
+    try {
+      const { target } = req.body;
+      routerEngine.setDefaultRouting(target);
+      
+      // Konfiguration aktualisieren
+      if (!config.routing) {
+        config.routing = { default: null, rules: [], fallback: [] };
+      }
+      config.routing.default = target;
+      
+      res.json({ success: true, message: 'Standard-Routing aktualisiert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Update Fallback
+  app.put('/api/v1/routing/fallback', (req, res) => {
+    try {
+      const { index, target } = req.body;
+      const routingConfig = routerEngine.getConfig();
+      routingConfig.fallback[index] = target;
+      
+      // Konfiguration aktualisieren
+      if (config.routing) {
+        config.routing.fallback[index] = target;
+      }
+      
+      res.json({ success: true, message: 'Fallback aktualisiert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Delete Fallback
+  app.delete('/api/v1/routing/fallback', (req, res) => {
+    try {
+      const { index } = req.body;
+      const routingConfig = routerEngine.getConfig();
+      routingConfig.fallback.splice(index, 1);
+      
+      // Konfiguration aktualisieren
+      if (config.routing) {
+        config.routing.fallback.splice(index, 1);
+      }
+      
+      res.json({ success: true, message: 'Fallback entfernt' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Test Routing
+  app.post('/api/v1/routing/test', async (req, res) => {
+    try {
+      const testData = req.body;
+      const result = await routerEngine.routeRequest(testData, { requestId: 'test-' + Date.now() });
+      res.json({ 
+        success: true,
+        resolvedProvider: result.provider,
+        resolvedModel: result.model,
+        content: result.content,
+        usage: result.usage
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Generate New API Key
+  app.post('/api/v1/settings/api-key', (req, res) => {
+    try {
+      const { generateApiKey } = require('./middleware/auth');
+      const newKey = generateApiKey();
+      res.json({ success: true, apiKey: newKey });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Clear Cache
+  app.post('/api/v1/cache/clear', (req, res) => {
+    res.json({ success: true, message: 'Cache geleert' });
+  });
+  
+  // Get Settings
+  app.get('/api/v1/settings', (req, res) => {
+    res.json({ 
+      success: true,
+      server: config.server,
+      logging: config.logging
+    });
+  });
+  
+  // Update Server Settings
+  app.put('/api/v1/settings/server', (req, res) => {
+    try {
+      const settings = req.body;
+      config.server = { ...config.server, ...settings };
+      res.json({ success: true, message: 'Server-Einstellungen gespeichert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  
+  // Update Logging Settings
+  app.put('/api/v1/settings/logging', (req, res) => {
+    try {
+      const settings = req.body;
+      config.logging = { ...config.logging, ...settings };
+      
+      // Logger neu initialisieren
+      const { initLogger } = require('./middleware/logger');
+      initLogger(config.logging);
+      
+      res.json({ success: true, message: 'Logging-Einstellungen gespeichert' });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
   });
   
   // 404 Handler

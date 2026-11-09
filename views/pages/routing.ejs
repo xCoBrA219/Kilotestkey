@@ -1,0 +1,548 @@
+<div class="routing-page">
+    <div class="page-header">
+        <h1>Routing-Konfiguration</h1>
+        <button class="btn btn-primary" onclick="openAddRuleModal()">
+            <i class="fas fa-plus"></i>
+            Regel hinzufügen
+        </button>
+    </div>
+
+    <div class="routing-grid">
+        <!-- Default Routing -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Standard-Routing</h2>
+            </div>
+            <div class="card-body">
+                <div class="default-routing">
+                    <div class="form-group">
+                        <label for="defaultRouting">Standard-Target</label>
+                        <select id="defaultRouting" onchange="updateDefaultRouting()">
+                            <option value="">-- Kein Standard-Routing --</option>
+                            <% if (providers && providers.length > 0) { %>
+                                <% providers.forEach(provider => { %>
+                                    <% provider.models.forEach(model => { %>
+                                        <option value="<%= provider.name %>,<%= model %>" 
+                                                <%= routing.default === `${provider.name},${model}` ? 'selected' : '' %>>
+                                            <%= provider.name %>: <%= model %>
+                                        </option>
+                                    <% }); %>
+                                <% }); %>
+                            <% } %>
+                        </select>
+                    </div>
+                    <p class="help-text">
+                        Alle Anfragen, die keine Regel treffen, werden zu diesem Target geroutet.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fallback Routing -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Fallback-Routing</h2>
+            </div>
+            <div class="card-body">
+                <div class="fallback-routing">
+                    <div class="form-group">
+                        <label>Fallback-Targets (in Reihenfolge)</label>
+                        <div id="fallbackList" class="fallback-list">
+                            <% if (routing.fallback && routing.fallback.length > 0) { %>
+                                <% routing.fallback.forEach((target, index) => { %>
+                                    <div class="fallback-item" data-index="<%= index %>">
+                                        <select onchange="updateFallback(<%= index %>, this.value)">
+                                            <option value="">-- Target auswählen --</option>
+                                            <% if (providers && providers.length > 0) { %>
+                                                <% providers.forEach(provider => { %>
+                                                    <% provider.models.forEach(model => { %>
+                                                        <option value="<%= provider.name %>,<%= model %>" 
+                                                                <%= target === `${provider.name},${model}` ? 'selected' : '' %>>
+                                                            <%= provider.name %>: <%= model %>
+                                                        </option>
+                                                    <% }); %>
+                                                <% }); %>
+                                            <% } %>
+                                        </select>
+                                        <button class="btn-icon btn-danger" onclick="removeFallback(<%= index %>)">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                <% }); %>
+                            <% } else { %>
+                                <div class="fallback-item" data-index="0">
+                                    <select>
+                                        <option value="">-- Target auswählen --</option>
+                                        <% if (providers && providers.length > 0) { %>
+                                            <% providers.forEach(provider => { %>
+                                                <% provider.models.forEach(model => { %>
+                                                    <option value="<%= provider.name %>,<%= model %>">
+                                                        <%= provider.name %>: <%= model %>
+                                                    </option>
+                                                <% }); %>
+                                            <% }); %>
+                                        <% } %>
+                                    </select>
+                                    <button class="btn-icon btn-danger" onclick="removeFallback(0)">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            <% } %>
+                        </div>
+                        <button class="btn btn-small btn-secondary" onclick="addFallback()">
+                            <i class="fas fa-plus"></i>
+                            Fallback hinzufügen
+                        </button>
+                    </div>
+                    <p class="help-text">
+                        Falls das Standard-Routing fehlschlägt, werden die Fallback-Targets in der angegebenen Reihenfolge versucht.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Routing Rules -->
+        <div class="card card-full">
+            <div class="card-header">
+                <h2>Routing-Regeln</h2>
+                <div class="header-actions">
+                    <button class="btn btn-small" onclick="testRouting()">
+                        <i class="fas fa-play"></i>
+                        Routing testen
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-container">
+                    <table class="routing-table">
+                        <thead>
+                            <tr>
+                                <th>Priorität</th>
+                                <th>Pattern</th>
+                                <th>Target</th>
+                                <th>Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="routingRules">
+                            <% if (routing.rules && routing.rules.length > 0) { %>
+                                <% routing.rules.forEach((rule, index) => { %>
+                                    <tr data-index="<%= index %>">
+                                        <td>
+                                            <input type="number" value="<%= rule.priority || 0 %>" 
+                                                   onchange="updateRulePriority(<%= index %>, this.value)" min="0">
+                                        </td>
+                                        <td class="pattern-cell">
+                                            <span><%= rule.pattern %></span>
+                                        </td>
+                                        <td class="target-cell">
+                                            <span><%= rule.target %></span>
+                                        </td>
+                                        <td class="actions-cell">
+                                            <button class="btn-icon" onclick="editRule(<%= index %>)">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button class="btn-icon btn-danger" onclick="deleteRule(<%= index %>)">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <% }); %>
+                            <% } else { %>
+                                <tr>
+                                    <td colspan="4" class="empty-state">
+                                        Keine Routing-Regeln konfiguriert
+                                    </td>
+                                </tr>
+                            <% } %>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Rule Modal -->
+    <div id="ruleModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="ruleModalTitle">Regel hinzufügen</h2>
+                <button class="btn-close" onclick="closeRuleModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="ruleForm" onsubmit="saveRule(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="rulePattern">Pattern *</label>
+                        <input type="text" id="rulePattern" required 
+                               placeholder="code-*, think, gpt-*">
+                        <small>
+                            Unterstützt Wildcards (*) und exakte Matches. 
+                            Beispiel: "code-*" matcht alle Modelle die mit "code-" beginnen.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ruleTarget">Target *</label>
+                        <select id="ruleTarget" required>
+                            <option value="">-- Target auswählen --</option>
+                            <% if (providers && providers.length > 0) { %>
+                                <% providers.forEach(provider => { %>
+                                    <% provider.models.forEach(model => { %>
+                                        <option value="<%= provider.name %>,<%= model %>">
+                                            <%= provider.name %>: <%= model %>
+                                        </option>
+                                    <% }); %>
+                                <% }); %>
+                            <% } %>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="rulePriority">Priorität</label>
+                        <input type="number" id="rulePriority" value="0" min="0">
+                        <small>Höhere Priorität = Regel wird zuerst geprüft</small>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeRuleModal()">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Speichern</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Test Routing Modal -->
+    <div id="testRoutingModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>Routing testen</h2>
+                <button class="btn-close" onclick="closeTestRoutingModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="test-routing-form">
+                    <div class="form-group">
+                        <label for="testModel">Modell</label>
+                        <input type="text" id="testModel" placeholder="gpt-4, code-gpt-4, etc.">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="testMessage">Nachricht (optional)</label>
+                        <textarea id="testMessage" rows="3" placeholder="Testnachricht..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="testHeaders">Header (JSON, optional)</label>
+                        <textarea id="testHeaders" rows="2" placeholder="{\"X-Provider\": \"openai\"}"></textarea>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="performRoutingTest()">
+                        <i class="fas fa-play"></i>
+                        Routing testen
+                    </button>
+                </div>
+                
+                <div id="testRoutingResults" class="test-results">
+                    <!-- Results will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentRuleIndex = null;
+
+    // Öffnet das Modal zum Hinzufügen einer Regel
+    function openAddRuleModal() {
+        currentRuleIndex = null;
+        document.getElementById('ruleModalTitle').textContent = 'Regel hinzufügen';
+        document.getElementById('ruleForm').reset();
+        document.getElementById('ruleModal').style.display = 'block';
+    }
+
+    // Bearbeitet eine Regel
+    function editRule(index) {
+        currentRuleIndex = index;
+        document.getElementById('ruleModalTitle').textContent = 'Regel bearbeiten';
+        
+        const rules = <%= JSON.stringify(routing.rules || []) %>;
+        const rule = rules[index];
+        
+        document.getElementById('rulePattern').value = rule.pattern;
+        document.getElementById('ruleTarget').value = rule.target;
+        document.getElementById('rulePriority').value = rule.priority || 0;
+        
+        document.getElementById('ruleModal').style.display = 'block';
+    }
+
+    // Schließt das Regel-Modal
+    function closeRuleModal() {
+        document.getElementById('ruleModal').style.display = 'none';
+        currentRuleIndex = null;
+    }
+
+    // Speichert eine Regel
+    function saveRule(event) {
+        event.preventDefault();
+        
+        const pattern = document.getElementById('rulePattern').value;
+        const target = document.getElementById('ruleTarget').value;
+        const priority = parseInt(document.getElementById('rulePriority').value) || 0;
+        
+        const ruleData = {
+            pattern,
+            target,
+            priority
+        };
+        
+        const method = currentRuleIndex !== null ? 'PUT' : 'POST';
+        const url = currentRuleIndex !== null 
+            ? `/api/v1/routing/rules/${currentRuleIndex}` 
+            : '/api/v1/routing/rules';
+        
+        fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(ruleData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(`Regel ${currentRuleIndex !== null ? 'aktualisiert' : 'hinzugefügt'}`, 'success');
+                closeRuleModal();
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showNotification(data.error || 'Fehler beim Speichern', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Speichern der Regel', 'error');
+        });
+    }
+
+    // Löscht eine Regel
+    function deleteRule(index) {
+        if (confirm('Sind Sie sicher, dass Sie diese Regel löschen möchten?')) {
+            fetch(`/api/v1/routing/rules/${index}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Regel gelöscht', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showNotification(data.error || 'Fehler beim Löschen', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Löschen der Regel', 'error');
+            });
+        }
+    }
+
+    // Aktualisiert die Priorität einer Regel
+    function updateRulePriority(index, priority) {
+        fetch(`/api/v1/routing/rules/${index}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ priority: parseInt(priority) || 0 })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                showNotification(data.error || 'Fehler beim Aktualisieren', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Aktualisieren der Priorität', 'error');
+        });
+    }
+
+    // Aktualisiert das Standard-Routing
+    function updateDefaultRouting() {
+        const target = document.getElementById('defaultRouting').value;
+        
+        fetch('/api/v1/routing/default', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ target })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                showNotification(data.error || 'Fehler beim Aktualisieren', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Aktualisieren des Standard-Routings', 'error');
+        });
+    }
+
+    // Fügt einen Fallback hinzu
+    function addFallback() {
+        const index = document.querySelectorAll('#fallbackList .fallback-item').length;
+        
+        const html = `
+            <div class="fallback-item" data-index="${index}">
+                <select onchange="updateFallback(${index}, this.value)">
+                    <option value="">-- Target auswählen --</option>
+                    <% if (providers && providers.length > 0) { %>
+                        <% providers.forEach(provider => { %>
+                            <% provider.models.forEach(model => { %>
+                                <option value="<%= provider.name %>,<%= model %>">
+                                    <%= provider.name %>: <%= model %>
+                                </option>
+                            <% }); %>
+                        <% }); %>
+                    <% } %>
+                </select>
+                <button class="btn-icon btn-danger" onclick="removeFallback(${index})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        document.getElementById('fallbackList').innerHTML += html;
+    }
+
+    // Aktualisiert einen Fallback
+    function updateFallback(index, target) {
+        fetch('/api/v1/routing/fallback', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ index, target })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                showNotification(data.error || 'Fehler beim Aktualisieren', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Aktualisieren des Fallbacks', 'error');
+        });
+    }
+
+    // Entfernt einen Fallback
+    function removeFallback(index) {
+        fetch('/api/v1/routing/fallback', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ index })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                showNotification(data.error || 'Fehler beim Entfernen', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Entfernen des Fallbacks', 'error');
+        });
+    }
+
+    // Öffnet das Routing-Test Modal
+    function testRouting() {
+        document.getElementById('testRoutingModal').style.display = 'block';
+    }
+
+    // Schließt das Routing-Test Modal
+    function closeTestRoutingModal() {
+        document.getElementById('testRoutingModal').style.display = 'none';
+    }
+
+    // Führt einen Routing-Test durch
+    function performRoutingTest() {
+        const model = document.getElementById('testModel').value;
+        const message = document.getElementById('testMessage').value;
+        let headers = {};
+        
+        try {
+            const headersInput = document.getElementById('testHeaders').value;
+            if (headersInput) {
+                headers = JSON.parse(headersInput);
+            }
+        } catch (e) {
+            showNotification('Ungültiges JSON für Header', 'error');
+            return;
+        }
+        
+        const testData = {
+            model,
+            messages: message ? [{ role: 'user', content: message }] : [],
+            headers
+        };
+        
+        fetch('/api/v1/routing/test', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(testData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            let html = '';
+            
+            if (data.success) {
+                html = `
+                    <div class="test-result success">
+                        <h3>✅ Routing erfolgreich</h3>
+                        <div class="result-grid">
+                            <div class="result-item">
+                                <span class="result-label">Modell:</span>
+                                <span class="result-value">${data.requestedModel || model}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Gelöste Regel:</span>
+                                <span class="result-value">${data.matchedRule || 'Standard-Routing'}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Ziel-Provider:</span>
+                                <span class="result-value">${data.resolvedProvider}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Ziel-Modell:</span>
+                                <span class="result-value">${data.resolvedModel}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html = `
+                    <div class="test-result error">
+                        <h3>❌ Routing fehlgeschlagen</h3>
+                        <p>${data.error || 'Unbekannter Fehler'}</p>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('testRoutingResults').innerHTML = html;
+        })
+        .catch(error => {
+            document.getElementById('testRoutingResults').innerHTML = `
+                <div class="test-result error">
+                    <h3>❌ Fehler beim Testen</h3>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        });
+    }
+</script>

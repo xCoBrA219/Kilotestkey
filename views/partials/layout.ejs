@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title || 'Cloud Code Router' %> - CCR</title>
+    <link rel="stylesheet" href="/styles/main.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-cloud"></i>
+                    <span>Cloud Code Router</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a href="/dashboard" class="nav-item <%= active === 'dashboard' ? 'active' : '' %>">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="/providers" class="nav-item <%= active === 'providers' ? 'active' : '' %>">
+                    <i class="fas fa-server"></i>
+                    <span>Provider</span>
+                </a>
+                <a href="/routing" class="nav-item <%= active === 'routing' ? 'active' : '' %>">
+                    <i class="fas fa-route"></i>
+                    <span>Routing</span>
+                </a>
+                <a href="/logs" class="nav-item <%= active === 'logs' ? 'active' : '' %>">
+                    <i class="fas fa-file-alt"></i>
+                    <span>Logs</span>
+                </a>
+                <a href="/settings" class="nav-item <%= active === 'settings' ? 'active' : '' %>">
+                    <i class="fas fa-cog"></i>
+                    <span>Einstellungen</span>
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="version">
+                    <span>v1.0.0</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-left">
+                    <button class="menu-toggle">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1><%= title || 'Dashboard' %></h1>
+                </div>
+                <div class="header-right">
+                    <div class="status-indicator">
+                        <span class="status-dot online"></span>
+                        <span>Online</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content -->
+            <div class="page-content">
+                <%- body %>
+            </div>
+
+            <!-- Footer -->
+            <footer class="footer">
+                <p>© 2024 Cloud Code Router. Ein Open-Source-Projekt.</p>
+            </footer>
+        </main>
+    </div>
+
+    <script src="/scripts/main.js"></script>
+    <%- scripts %>
+</body>
+</html>

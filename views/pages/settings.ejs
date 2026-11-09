@@ -1,0 +1,329 @@
+<div class="settings-page">
+    <div class="page-header">
+        <h1>Einstellungen</h1>
+    </div>
+
+    <div class="settings-grid">
+        <!-- Server Settings -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Server-Einstellungen</h2>
+            </div>
+            <div class="card-body">
+                <form id="serverSettingsForm" onsubmit="saveServerSettings(event)">
+                    <div class="form-group">
+                        <label for="serverPort">Port</label>
+                        <input type="number" id="serverPort" value="<%= server.port || 3000 %>" min="1" max="65535">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="serverHost">Host</label>
+                        <input type="text" id="serverHost" value="<%= server.host || '0.0.0.0' %>">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="serverApiKey">API-Schlüssel (optional)</label>
+                        <input type="password" id="serverApiKey" value="<%= server.apiKey ? '********' : '' %>">
+                        <small>Lassen Sie leer, um keine Authentifizierung zu erfordern</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="serverRateLimit" <%= server.rateLimit?.enabled ? 'checked' : '' %>>
+                            Rate-Limiting aktivieren
+                        </label>
+                    </div>
+                    
+                    <div class="form-group" id="rateLimitGroup" style="display: <%= server.rateLimit?.enabled ? 'block' : 'none' %>">
+                        <label for="serverRateLimitValue">Requests pro Minute</label>
+                        <input type="number" id="serverRateLimitValue" value="<%= server.rateLimit?.requestsPerMinute || 100 %>" min="1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="serverCorsOrigins">CORS-Origins (kommagetrennt)</label>
+                        <input type="text" id="serverCorsOrigins" value="<%= server.corsOrigins ? server.corsOrigins.join(',') : '*' %>">
+                        <small>Lassen Sie * für alle Origins zu</small>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i>
+                        Speichern
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Logging Settings -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Logging-Einstellungen</h2>
+            </div>
+            <div class="card-body">
+                <form id="loggingSettingsForm" onsubmit="saveLoggingSettings(event)">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="loggingEnabled" <%= logging.enabled !== false ? 'checked' : '' %>>
+                            Logging aktivieren
+                        </label>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="loggingLevel">Log-Level</label>
+                        <select id="loggingLevel">
+                            <option value="error" <%= logging.level === 'error' ? 'selected' : '' %>>Error</option>
+                            <option value="warn" <%= logging.level === 'warn' ? 'selected' : '' %>>Warn</option>
+                            <option value="info" <%= logging.level === 'info' ? 'selected' : '' %>>Info</option>
+                            <option value="debug" <%= logging.level === 'debug' ? 'selected' : '' %>>Debug</option>
+                            <option value="silly" <%= logging.level === 'silly' ? 'selected' : '' %>>Silly</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="loggingFile">Log-Datei</label>
+                        <input type="text" id="loggingFile" value="<%= logging.file || 'logs/router.log' %>">
+                        <small>Lassen Sie leer, um nur in die Konsole zu loggen</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="loggingMaxSize">Max Dateigröße</label>
+                        <input type="text" id="loggingMaxSize" value="<%= logging.maxSize || '10m' %>">
+                        <small>z.B. 10m, 100m, 1g</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="loggingMaxFiles">Max Anzahl Dateien</label>
+                        <input type="number" id="loggingMaxFiles" value="<%= logging.maxFiles || 5 %>" min="1">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i>
+                        Speichern
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Security Settings -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Sicherheit</h2>
+            </div>
+            <div class="card-body">
+                <div class="security-settings">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="requireAuth" onchange="toggleAuthRequirement()">
+                            API-Schlüssel für alle Anfragen erfordern
+                        </label>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="trustedProxies">Vertrauenswürdige Proxies</label>
+                        <textarea id="trustedProxies" rows="2" placeholder="127.0.0.1, 192.168.1.1"></textarea>
+                        <small>IP-Adressen von vertrauenswürdigen Proxies (kommagetrennt)</small>
+                    </div>
+                    
+                    <button class="btn btn-secondary" onclick="generateNewApiKey()">
+                        <i class="fas fa-key"></i>
+                        Neuer API-Schlüssel generieren
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- About & Info -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Über Cloud Code Router</h2>
+            </div>
+            <div class="card-body">
+                <div class="about-info">
+                    <div class="info-row">
+                        <span class="info-label">Version:</span>
+                        <span class="info-value">1.0.0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Node.js:</span>
+                        <span class="info-value"><%= server.nodeVersion || 'Unbekannt' %></span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Betriebszeit:</span>
+                        <span class="info-value"><%= stats.uptime || '0' %> Sekunden</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">GitHub:</span>
+                        <span class="info-value">
+                            <a href="https://github.com/xCoBrA219/Kilotestkey" target="_blank">
+                                xCoBrA219/Kilotestkey
+                            </a>
+                        </span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Lizenz:</span>
+                        <span class="info-value">MIT</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="card card-danger">
+            <div class="card-header">
+                <h2>⚠️ Gefahrenzone</h2>
+            </div>
+            <div class="card-body">
+                <div class="danger-settings">
+                    <p>Diese Aktionen können nicht rückgängig gemacht werden.</p>
+                    
+                    <button class="btn btn-danger" onclick="resetConfig()">
+                        <i class="fas fa-undo"></i>
+                        Konfiguration zurücksetzen
+                    </button>
+                    
+                    <button class="btn btn-danger" onclick="clearAllData()">
+                        <i class="fas fa-trash"></i>
+                        Alle Daten löschen
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Zeigt/Versteckt Rate-Limit-Optionen
+    function toggleRateLimit() {
+        const enabled = document.getElementById('serverRateLimit').checked;
+        document.getElementById('rateLimitGroup').style.display = enabled ? 'block' : 'none';
+    }
+    
+    document.getElementById('serverRateLimit').addEventListener('change', toggleRateLimit);
+
+    // Speichert Server-Einstellungen
+    function saveServerSettings(event) {
+        event.preventDefault();
+        
+        const settings = {
+            port: parseInt(document.getElementById('serverPort').value) || 3000,
+            host: document.getElementById('serverHost').value,
+            apiKey: document.getElementById('serverApiKey').value || null,
+            rateLimit: {
+                enabled: document.getElementById('serverRateLimit').checked,
+                requestsPerMinute: parseInt(document.getElementById('serverRateLimitValue').value) || 100
+            },
+            corsOrigins: document.getElementById('serverCorsOrigins').value.split(',').map(s => s.trim())
+        };
+        
+        fetch('/api/v1/settings/server', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('Server-Einstellungen gespeichert', 'success');
+            } else {
+                showNotification(data.error || 'Fehler beim Speichern', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Speichern der Server-Einstellungen', 'error');
+        });
+    }
+
+    // Speichert Logging-Einstellungen
+    function saveLoggingSettings(event) {
+        event.preventDefault();
+        
+        const settings = {
+            enabled: document.getElementById('loggingEnabled').checked,
+            level: document.getElementById('loggingLevel').value,
+            file: document.getElementById('loggingFile').value || null,
+            maxSize: document.getElementById('loggingMaxSize').value,
+            maxFiles: parseInt(document.getElementById('loggingMaxFiles').value) || 5
+        };
+        
+        fetch('/api/v1/settings/logging', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('Logging-Einstellungen gespeichert', 'success');
+            } else {
+                showNotification(data.error || 'Fehler beim Speichern', 'error');
+            }
+        })
+        .catch(error => {
+            showNotification('Fehler beim Speichern der Logging-Einstellungen', 'error');
+        });
+    }
+
+    // Generiert einen neuen API-Schlüssel
+    function generateNewApiKey() {
+        if (confirm('Soll ein neuer API-Schlüssel generiert werden? Der alte Schlüssel wird ungültig.')) {
+            fetch('/api/v1/settings/api-key', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('serverApiKey').value = data.apiKey;
+                    showNotification('Neuer API-Schlüssel generiert', 'success');
+                } else {
+                    showNotification(data.error || 'Fehler beim Generieren', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Generieren des API-Schlüssels', 'error');
+            });
+        }
+    }
+
+    // Setzt die Konfiguration zurück
+    function resetConfig() {
+        if (confirm('Sind Sie sicher, dass Sie die Konfiguration auf die Standardwerte zurücksetzen möchten?')) {
+            fetch('/api/v1/settings/reset', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Konfiguration zurückgesetzt. Bitte starten Sie den Server neu.', 'success');
+                } else {
+                    showNotification(data.error || 'Fehler beim Zurücksetzen', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Zurücksetzen der Konfiguration', 'error');
+            });
+        }
+    }
+
+    // Löscht alle Daten
+    function clearAllData() {
+        if (confirm('Sind Sie sicher, dass Sie ALLE Daten löschen möchten? Dies kann nicht rückgängig gemacht werden!')) {
+            fetch('/api/v1/settings/clear-all', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Alle Daten gelöscht. Bitte starten Sie den Server neu.', 'success');
+                } else {
+                    showNotification(data.error || 'Fehler beim Löschen', 'error');
+                }
+            })
+            .catch(error => {
+                showNotification('Fehler beim Löschen aller Daten', 'error');
+            });
+        }
+    }
+</script>
