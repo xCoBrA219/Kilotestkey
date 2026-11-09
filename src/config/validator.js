@@ -58,6 +58,14 @@ const loggingSchema = Joi.object({
 });
 
 /**
+ * Schema für Föderation/Peer-Konfiguration
+ */
+const federationSchema = Joi.object({
+  enabled: Joi.boolean().default(false),
+  peers: Joi.array().items(Joi.string().uri()).default([])
+});
+
+/**
  * Haupt-Konfigurationsschema
  */
 const configSchema = Joi.object({
@@ -67,7 +75,8 @@ const configSchema = Joi.object({
     providerSchema.required()
   ).default({}),
   routing: routingSchema.default(),
-  logging: loggingSchema.default()
+  logging: loggingSchema.default(),
+  federation: federationSchema.default()
 });
 
 /**

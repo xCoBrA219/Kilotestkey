@@ -4,7 +4,8 @@
  * Prüft API-Schlüssel für den Router
  */
 
-const logger = require('./logger');
+const { logger } = require('./logger');
+const { verifyToken, extractToken } = require('../utils/auth');
 
 /**
  * Erstellt die Authentifizierungs-Middleware
@@ -19,6 +20,11 @@ function authMiddleware(apiKey) {
   
   return (req, res, next) => {
     try {
+      // Auth-Routen (Registrierung/Login) sind ohne Router-API-Schlüssel zugänglich
+      if (req.path && req.path.startsWith('/api/v1/auth/')) {
+        return next();
+      }
+
       // API-Schlüssel aus Headers extrahieren
       const authHeader = req.headers.authorization || req.headers.Authorization;
       
@@ -103,9 +109,41 @@ function validateApiKey(apiKey, expectedKey) {
   return apiKey === expectedKey;
 }
 
+/**
+ * JWT-Authentifizierungs-Middleware für Benutzerkonten
+ * Setzt req.user bei Erfolg, sonst 401
+ * @returns {Function} Express-Middleware
+ */
+function jwtAuthMiddleware(req, res, next) {
+  try {
+    const token = extractToken(req);
+    if (!token) {
+      return res.status(401).json({
+        error: { message: 'Authentifizierung erforderlich', type: 'unauthorized', code: 401 }
+      });
+    }
+
+    const user = verifyToken(token);
+    if (!user) {
+      return res.status(401).json({
+        error: { message: 'Ungültiger oder abgelaufener Token', type: 'unauthorized', code: 401 }
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    logger.error('Fehler in JWT-Auth-Middleware:', error);
+    return res.status(500).json({
+      error: { message: 'Interner Serverfehler', type: 'server_error', code: 500 }
+    });
+  }
+}
+
 module.exports = {
   authMiddleware,
   providerAuthMiddleware,
+  jwtAuthMiddleware,
   generateApiKey,
   validateApiKey
 };

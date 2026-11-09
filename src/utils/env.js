@@ -4,7 +4,7 @@
  * Hilfsfunktionen für Environment-Variablen
  */
 
-const logger = require('../middleware/logger');
+const { logger } = require('../middleware/logger');
 
 /**
  * Ersetzt Environment-Variablen in einem String

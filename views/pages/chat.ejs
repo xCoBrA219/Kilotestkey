@@ -1,0 +1,855 @@
+<div class="chat-page">
+    <!-- Login / Register Modal -->
+    <div id="authModal" class="modal active">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="authModalTitle">Anmelden</h2>
+            </div>
+            <div class="modal-body">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" onclick="switchAuthTab('login')">Anmelden</button>
+                    <button class="auth-tab" onclick="switchAuthTab('register')">Registrieren</button>
+                </div>
+                <form id="authForm" onsubmit="handleAuthSubmit(event)">
+                    <div id="loginFields" class="auth-fields">
+                        <div class="form-group">
+                            <label for="loginUsername">Benutzername</label>
+                            <input type="text" id="loginUsername" required placeholder="Benutzername">
+                        </div>
+                        <div class="form-group">
+                            <label for="loginPassword">Passwort</label>
+                            <input type="password" id="loginPassword" required placeholder="Passwort">
+                        </div>
+                    </div>
+                    <div id="registerFields" class="auth-fields" style="display:none;">
+                        <div class="form-group">
+                            <label for="regUsername">Benutzername</label>
+                            <input type="text" id="regUsername" required placeholder="Benutzername">
+                        </div>
+                        <div class="form-group">
+                            <label for="regPassword">Passwort</label>
+                            <input type="password" id="regPassword" required placeholder="Passwort (mind. 6 Zeichen)">
+                        </div>
+                        <div class="form-group">
+                            <label for="regConfirm">Passwort wiederholen</label>
+                            <input type="password" id="regConfirm" required placeholder="Passwort wiederholen">
+                        </div>
+                    </div>
+                    <div id="authError" class="auth-error" style="display:none; color:var(--error-color); margin-bottom:10px;"></div>
+                </form>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="document.getElementById('authForm').requestSubmit()">
+                        <span id="authBtnText">Anmelden</span>
+                    </button>
+                    <button class="btn btn-secondary" onclick="switchAuthTab(document.getElementById('loginFields').style.display==='none'?'login':'register')" style="margin-left:auto;">
+                        <span id="authSwitchText">Noch kein Konto? Registrieren</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Federation / Peer Selector -->
+    <div id="federationBar" class="federation-bar" style="display:none;">
+        <div class="federation-content">
+            <span class="federation-label"><i class="fas fa-share-alt"></i> Verbundene Router:</span>
+            <select id="peerSelect" class="chat-select" onchange="changePeer()">
+                <option value="">-- Peer auswählen --</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="managePeers()">
+                <i class="fas fa-cog"></i>
+                Peers verwalten
+            </button>
+            <span id="federationStatus" class="federation-status"></span>
+        </div>
+    </div>
+
+    <!-- Sidebar: Sessions -->
+    <aside class="chat-sidebar">
+        <div class="chat-sidebar-header">
+            <h2>Sprachchats</h2>
+            <button class="btn btn-primary btn-sm" onclick="newChat()">
+                <i class="fas fa-plus"></i>
+                Neuer Chat
+            </button>
+        </div>
+        <div class="chat-sessions-list" id="chatSessionsList">
+            <% if (sessions && sessions.length > 0) { %>
+                <% sessions.forEach(session => { %>
+                    <div class="chat-session-item" data-id="<%= session.id %>" onclick="loadSession('<%= session.id %>')">
+                        <div class="chat-session-info">
+                            <span class="chat-session-title"><%= session.title || 'Neuer Chat' %></span>
+                            <span class="chat-session-model"><%= session.model || '-' %></span>
+                        </div>
+                        <span class="chat-session-time"><%= new Date(session.updatedAt).toLocaleTimeString('de-DE') %></span>
+                        <button class="btn-icon btn-danger" onclick="deleteSession(event, '<%= session.id %>')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                <% }); %>
+            <% } else { %>
+                <div class="empty-state">
+                    <i class="fas fa-comments"></i>
+                    <p>Keine Chats vorhanden</p>
+                </div>
+            <% } %>
+        </div>
+    </aside>
+
+    <!-- Main: Chat -->
+    <main class="chat-main">
+        <header class="chat-header">
+            <div class="chat-header-left">
+                <h1 id="chatTitle">Neuer Chat</h1>
+                <div id="chatStatus" class="chat-status">
+                    <span class="status-dot offline"></span>
+                    <span>Kein Modell gewählt</span>
+                </div>
+            </div>
+            <div class="chat-header-right">
+                <div class="chat-controls">
+                    <select id="modelSelect" class="chat-select" onchange="changeModel()">
+                        <option value="">-- Modell auswählen --</option>
+                        <% if (models && models.length > 0) { %>
+                            <% models.forEach(m => { %>
+                                <option value="<%= m.id %>"><%= m.provider %>: <%= m.model %></option>
+                            <% }); %>
+                        <% } %>
+                    </select>
+                    <select id="providerSelect" class="chat-select" onchange="changeProvider()">
+                        <option value="">-- Provider auswählen --</option>
+                        <% if (providers && providers.length > 0) { %>
+                            <% providers.forEach(p => { %>
+                                <option value="<%= p.name %>" <%= p.available ? '' : 'disabled' %>>
+                                    <%= p.name %> (<%= p.available ? 'Online' : 'Offline' %>)
+                                </option>
+                            <% }); %>
+                        <% } %>
+                    </select>
+                    <button class="btn btn-primary btn-sm" onclick="startStreaming()">
+                        <i class="fas fa-play"></i>
+                        Senden
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <div class="chat-messages" id="chatMessages" style="display:none;">
+            <% if (messages && messages.length > 0) { %>
+                <% messages.forEach(msg => { %>
+                    <div class="chat-message <%= msg.role %>">
+                        <div class="chat-message-avatar">
+                            <i class="fas <%= msg.role === 'user' ? 'fa-user' : 'fa-robot' %>"></i>
+                        </div>
+                        <div class="chat-message-content">
+                            <div class="chat-message-text"><%= msg.content %></div>
+                            <% if (msg.provider || msg.model) { %>
+                                <div class="chat-message-meta">
+                                    <span><%= msg.provider || '' %><% if (msg.provider && msg.model) { %>:<% } %><%= msg.model || '' %></span>
+                                </div>
+                            <% } %>
+                        </div>
+                    </div>
+                <% }); %>
+            <% } else { %>
+                <div class="chat-empty">
+                    <p>Wähle ein Modell und beginne den Sprachchat.</p>
+                </div>
+            <% } %>
+            <div id="typingIndicator" class="typing-indicator" style="display:none;">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <span>Schreibt...</span>
+            </div>
+        </div>
+
+        <form id="chatForm" onsubmit="sendMessage(event)">
+            <div class="chat-input-area">
+                <textarea id="messageInput" rows="1" placeholder="Nachricht eingeben (Enter zum Senden, Shift+Enter für Zeilenumbruch)..."></textarea>
+                <button type="submit" class="btn btn-primary" id="sendBtn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </form>
+    </main>
+</div>
+
+<script>
+    let currentSessionId = null;
+    let eventSource = null;
+    let abortController = null;
+
+    // Modell wechseln
+    function changeModel() {
+        const select = document.getElementById('modelSelect');
+        const modelId = select.value;
+        const providerSelect = document.getProviderSelect();
+
+        if (modelId) {
+            const [provider, model] = modelId.split(':');
+            providerSelect.value = provider;
+            if (currentSessionId) {
+                updateSessionModel(model, provider);
+            }
+            updateStatus(`Modell: ${model} (${provider})`, 'online');
+        } else {
+            updateStatus('Kein Modell gewählt', 'offline');
+        }
+    }
+
+    function getProviderSelect() {
+        return document.getElementById('providerSelect');
+    }
+
+    // Provider wechseln
+    function changeProvider() {
+        const select = document.getElementById('providerSelect');
+        const provider = select.value;
+        if (provider && currentSessionId) {
+            updateSessionProvider(provider);
+        }
+    }
+
+    // Status aktualisieren
+    function updateStatus(text, state) {
+        const status = document.getElementById('chatStatus');
+        const dot = status.querySelector('.status-dot');
+        const textSpan = status.querySelector('span:last-child');
+        dot.className = `status-dot ${state}`;
+        textSpan.textContent = text;
+    }
+
+    // Neue Session
+    function newChat() {
+        currentSessionId = null;
+        document.getElementById('chatMessages').innerHTML = '<div class="chat-empty"><p>Wähle ein Modell und beginne den Sprachchat.</p></div>';
+        document.getElementById('chatTitle').textContent = 'Neuer Chat';
+        document.getElementById('modelSelect').value = '';
+        document.getElementById('providerSelect').value = '';
+        document.getElementById('messageInput').value = '';
+        updateStatus('Kein Modell gewählt', 'offline');
+        loadSessions();
+    }
+
+    // Session laden
+    function loadSession(id) {
+        apiFetch(`/api/v1/chat/sessions/${id}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const session = data.session;
+                    currentSessionId = id;
+                    document.getElementById('chatTitle').textContent = session.title;
+                    document.getElementById('modelSelect').value = '';
+                    document.getElementById('providerSelect').value = '';
+                    if (session.model) {
+                        document.getElementById('modelSelect').value = `${session.provider}:${session.model}`;
+                    }
+                    if (session.provider) {
+                        document.getElementById('providerSelect').value = session.provider;
+                    }
+                    updateStatus(`${session.provider || 'Unbekannt'}:${session.model || '-'}`, 'online');
+                    renderMessages(session.messages);
+                }
+            })
+            .catch(err => {
+                showNotification('Fehler beim Laden der Session', 'error');
+            });
+    }
+
+    // Session aktualisieren (Modell/Provider wird bei erster Nachricht gespeichert)
+    function updateSessionModel(model, provider) {
+        // No-op: Auswahl wird serverseitig bei der ersten Nachricht gespeichert
+    }
+
+    function updateSessionProvider(provider) {
+        if (!currentSessionId) return;
+        // Nur Provider merken, erfolgt bei erster Nachricht
+    }
+
+    // Nachrichten rendern
+    function renderMessages(messages) {
+        const container = document.getElementById('chatMessages');
+        container.innerHTML = '';
+        if (messages.length === 0) {
+            container.innerHTML = '<div class="chat-empty"><p>Wähle ein Modell und beginne den Sprachchat.</p></div>';
+            return;
+        }
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            div.className = `chat-message ${msg.role}`;
+            div.innerHTML = `
+                <div class="chat-message-avatar">
+                    <i class="fas ${msg.role === 'user' ? 'fa-user' : 'fa-robot'}"></i>
+                </div>
+                <div class="chat-message-content">
+                    <div class="chat-message-text">${escapeHtml(msg.content)}</div>
+                    ${msg.provider || msg.model ? `<div class="chat-message-meta"><span>${escapeHtml(msg.provider || '')}${msg.provider && msg.model ? ':' : ''}${escapeHtml(msg.model || '')}</span></div>` : ''}
+                </div>
+            `;
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // Nachricht senden
+    function sendMessage(event) {
+        event.preventDefault();
+        const input = document.getElementById('messageInput');
+        const content = input.value.trim();
+        if (!content) return;
+
+        const peerSelect = document.getElementById('peerSelect');
+        if (peerSelect && peerSelect.value) {
+            // Föderation: an Peer-Router senden
+            addUserMessage(content);
+            input.value = '';
+            input.style.height = 'auto';
+            sendFederatedMessageLocal(content);
+            return;
+        }
+
+        const modelSelect = document.getElementById('modelSelect');
+        const providerSelect = document.getElementById('providerSelect');
+        const modelId = modelSelect.value;
+        const provider = providerSelect.value;
+
+        let model = '';
+        if (modelId) {
+            const parts = modelId.split(':');
+            model = parts[1] || parts[0];
+        }
+
+        if (!model && !provider) {
+            showNotification('Bitte wähle zuerst ein Modell oder Provider aus.', 'warning');
+            return;
+        }
+
+        // eigene Nachricht anzeigen
+        addUserMessage(content);
+        input.value = '';
+        input.style.height = 'auto';
+
+        // Session erstellen falls neu
+        if (!currentSessionId) {
+            createSession(content, model, provider);
+            return;
+        }
+
+        // Nachricht senden
+        sendChatMessage(content, model, provider);
+    }
+
+    // Lokale Nachricht + Föderations-Sende-Trigger (holt Peer-Auswahl)
+    async function sendFederatedMessageLocal(content) {
+        const select = document.getElementById('peerSelect');
+        const peerIndex = select.value;
+        const targetUser = prompt('Ziel-Benutzername auf dem Peer-Router:');
+        if (!targetUser) return;
+
+        try {
+            const res = await apiFetch('/api/v1/federation/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peerIndex, targetUser, content })
+            });
+            const data = await res.json();
+            if (data.success) {
+                addAssistantMessage(data.reply.content || '', 'federation', data.reply.model);
+            } else {
+                showNotification(data.error || 'Föderations-Nachricht fehlgeschlagen', 'error');
+            }
+        } catch (e) {
+            showNotification('Fehler beim Senden über Peer', 'error');
+        }
+    }
+
+    function addUserMessage(content) {
+        const container = document.getElementById('chatMessages');
+        const empty = container.querySelector('.chat-empty');
+        if (empty) empty.remove();
+        const div = document.createElement('div');
+        div.className = 'chat-message user';
+        div.innerHTML = `
+            <div class="chat-message-avatar"><i class="fas fa-user"></i></div>
+            <div class="chat-message-content">
+                <div class="chat-message-text">${escapeHtml(content)}</div>
+            </div>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function addAssistantMessage(content, provider, model) {
+        const container = document.getElementById('chatMessages');
+        const div = document.createElement('div');
+        div.className = 'chat-message assistant';
+        div.innerHTML = `
+            <div class="chat-message-avatar"><i class="fas fa-robot"></i></div>
+            <div class="chat-message-content">
+                <div class="chat-message-text">${escapeHtml(content)}</div>
+                ${provider || model ? `<div class="chat-message-meta"><span>${escapeHtml(provider || '')}${provider && model ? ':' : ''}${escapeHtml(model || '')}</span></div>` : ''}
+            </div>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // Session erstellen
+    function createSession(firstContent, model, provider) {
+        apiFetch('/api/v1/chat/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: firstContent.length > 30 ? firstContent.slice(0, 30) + '...' : firstContent, model, provider })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                currentSessionId = data.session.id;
+                document.getElementById('chatTitle').textContent = data.session.title;
+                sendChatMessage(firstContent, model, provider);
+                loadSessions();
+            }
+        })
+        .catch(err => showNotification('Fehler beim Erstellen der Session', 'error'));
+    }
+
+    // Chat-Nachricht senden (mit Streaming)
+    function sendChatMessage(content, model, provider) {
+        const typing = document.getElementById('typingIndicator');
+        typing.style.display = 'block';
+
+        const headers = {};
+        if (provider) headers['x-provider'] = provider;
+
+        fetch('/api/v1/chat/completions/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ model, messages: [{ role: 'user', content }], stream: true })
+        })
+        .then(async response => {
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error?.message || 'Streaming-Fehler');
+            }
+            return response;
+        })
+        .then(response => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let assistantContent = '';
+            let resolvedProvider = provider;
+            let resolvedModel = model;
+
+            typing.style.display = 'none';
+
+            // Platzhalter für Assistant-Antwort
+            const container = document.getElementById('chatMessages');
+            const assistantDiv = document.createElement('div');
+            assistantDiv.className = 'chat-message assistant streaming';
+            assistantDiv.innerHTML = `
+                <div class="chat-message-avatar"><i class="fas fa-robot"></i></div>
+                <div class="chat-message-content">
+                    <div class="chat-message-text" id="streamingContent"></div>
+                    <div class="chat-message-meta" id="streamingMeta" style="display:none;"><span></span></div>
+                </div>
+            `;
+            container.appendChild(assistantDiv);
+            container.scrollTop = container.scrollHeight;
+
+            const contentEl = document.getElementById('streamingContent');
+            const metaEl = document.getElementById('streamingMeta');
+
+            return readStream(reader, decoder, buffer, (chunk) => {
+                buffer += chunk;
+                let lines;
+                while ((lines = splitSSE(buffer)).length > 0) {
+                    const { remaining, events } = lines;
+                    buffer = remaining;
+                    for (const evt of events) {
+                        handleSSEEvent(evt, contentEl, metaEl, (c) => { assistantContent += c; },
+                            (p, m) => { resolvedProvider = p; resolvedModel = m; });
+                    }
+                }
+            }).then(() => {
+                assistantDiv.classList.remove('streaming');
+                if (metaEl) {
+                    metaEl.style.display = 'block';
+                    metaEl.querySelector('span').textContent = `${resolvedProvider || ''}${resolvedProvider && resolvedModel ? ':' : ''}${resolvedModel || ''}`;
+                }
+                // in Session speichern
+                if (currentSessionId) {
+                    apiFetch(`/api/v1/chat/sessions/${currentSessionId}/messages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ content: assistantContent, model: resolvedModel, provider: resolvedProvider })
+                    }).catch(() => {});
+                }
+                loadSessions();
+            });
+        })
+        .catch(err => {
+            typing.style.display = 'none';
+            showNotification(err.message || 'Fehler beim Senden', 'error');
+        });
+    }
+
+    function readStream(reader, decoder, buffer, onData) {
+        return new Promise((resolve, reject) => {
+            function pump() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        resolve();
+                        return;
+                    }
+                    const text = decoder.decode(value, { stream: true });
+                    onData(text);
+                    pump();
+                }).catch(reject);
+            }
+            pump();
+        });
+    }
+
+    function splitSSE(buffer) {
+        const events = [];
+        let remaining = buffer;
+        let idx;
+        while ((idx = remaining.indexOf('\n\n')) !== -1) {
+            const block = remaining.slice(0, idx);
+            remaining = remaining.slice(idx + 2);
+            const lines = block.split('\n');
+            let data = '';
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    data += line.slice(6) + '\n';
+                }
+            }
+            if (data.trim()) {
+                try {
+                    const parsed = JSON.parse(data.trim());
+                    events.push(parsed);
+                } catch (e) {
+                    // ignore unparseable
+                }
+            }
+        }
+        return { remaining, events };
+    }
+
+    function handleSSEEvent(evt, contentEl, metaEl, onContent, onMeta) {
+        if (evt.type === 'start') {
+            if (onMeta) onMeta(evt.data.provider, evt.data.model);
+        } else if (evt.type === 'delta') {
+            if (evt.data.content) {
+                contentEl.textContent += evt.data.content;
+                onContent(evt.data.content);
+                document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+            }
+        } else if (evt.type === 'done') {
+            if (onMeta) onMeta(evt.data.provider, evt.data.model);
+        } else if (evt.type === 'error') {
+            showNotification(evt.data.message || 'Streaming-Fehler', 'error');
+        }
+    }
+
+    function startStreaming() {
+        const input = document.getElementById('messageInput');
+        input.dispatchEvent(new Event('submit', { cancelable: true }));
+        // Form-Submit wird über onsubmit abgefangen
+    }
+
+    // Session löschen
+    function deleteSession(event, id) {
+        event.stopPropagation();
+        if (confirm('Chat wirklich löschen?')) {
+            apiFetch(`/api/v1/chat/sessions/${id}`, { method: 'DELETE' })
+                .then(() => {
+                    if (currentSessionId === id) newChat();
+                    loadSessions();
+                })
+                .catch(() => showNotification('Fehler beim Löschen', 'error'));
+        }
+    }
+
+    // Sessionsliste laden
+    function loadSessions() {
+        apiFetch('/api/v1/chat/sessions')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const container = document.getElementById('chatSessionsList');
+                    container.innerHTML = '';
+                    if (data.sessions.length === 0) {
+                        container.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Keine Chats vorhanden</p></div>';
+                        return;
+                    }
+                    data.sessions.forEach(session => {
+                        const div = document.createElement('div');
+                        div.className = `chat-session-item${currentSessionId === session.id ? ' active' : ''}`;
+                        div.setAttribute('data-id', session.id);
+                        div.onclick = () => loadSession(session.id);
+                        div.innerHTML = `
+                            <div class="chat-session-info">
+                                <span class="chat-session-title">${escapeHtml(session.title || 'Neuer Chat')}</span>
+                                <span class="chat-session-model">${escapeHtml(session.model || '-')}</span>
+                            </div>
+                            <span class="chat-session-time">${new Date(session.updatedAt).toLocaleTimeString('de-DE')}</span>
+                            <button class="btn-icon btn-danger" onclick="deleteSession(event, '${session.id}')"><i class="fas fa-trash"></i></button>
+                        `;
+                        container.appendChild(div);
+                    });
+                }
+            })
+            .catch(() => showNotification('Fehler beim Laden der Sessions', 'error'));
+    }
+
+    // Autoresize Textarea
+    const input = document.getElementById('messageInput');
+    input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById('chatForm').requestSubmit();
+        }
+    });
+
+    // HTML Escape
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== Auth & Federation =====
+
+    function getToken() {
+        return localStorage.getItem('ccr_token') || null;
+    }
+
+    function setToken(token) {
+        localStorage.setItem('ccr_token', token);
+    }
+
+    function clearToken() {
+        localStorage.removeItem('ccr_token');
+    }
+
+    function authHeaders() {
+        const t = getToken();
+        return t ? { 'Authorization': 'Bearer ' + t } : {};
+    }
+
+    // Fetch-Helfer mit Auth-Header
+    async function apiFetch(url, options = {}) {
+        const headers = { ...authHeaders(), ...options.headers };
+        return fetch(url, { ...options, headers });
+    }
+
+    function showAuthModal() {
+        document.getElementById('authModal').classList.add('active');
+        document.getElementById('authModal').style.display = 'flex';
+    }
+
+    function hideAuthModal() {
+        document.getElementById('authModal').classList.remove('active');
+        document.getElementById('authModal').style.display = 'none';
+    }
+
+    function switchAuthTab(tab) {
+        const loginFields = document.getElementById('loginFields');
+        const registerFields = document.getElementById('registerFields');
+        const tabs = document.querySelectorAll('.auth-tab');
+        const btnText = document.getElementById('authBtnText');
+        const switchText = document.getElementById('authSwitchText');
+        const title = document.getElementById('authModalTitle');
+
+        tabs.forEach(t => t.classList.toggle('active', t.getAttribute('onclick') && t.getAttribute('onclick').includes(tab)));
+        if (tab === 'login') {
+            loginFields.style.display = 'block';
+            registerFields.style.display = 'none';
+            btnText.textContent = 'Anmelden';
+            switchText.textContent = 'Noch kein Konto? Registrieren';
+            title.textContent = 'Anmelden';
+        } else {
+            loginFields.style.display = 'none';
+            registerFields.style.display = 'block';
+            btnText.textContent = 'Registrieren';
+            switchText.textContent = 'Bereits registriert? Anmelden';
+            title.textContent = 'Registrieren';
+        }
+        document.getElementById('authError').style.display = 'none';
+    }
+
+    function showAuthError(msg) {
+        const el = document.getElementById('authError');
+        el.textContent = msg;
+        el.style.display = 'block';
+    }
+
+    async function handleAuthSubmit(event) {
+        event.preventDefault();
+        const isLogin = document.getElementById('loginFields').style.display !== 'none';
+        const username = isLogin ? document.getElementById('loginUsername').value : document.getElementById('regUsername').value;
+        const password = isLogin ? document.getElementById('loginPassword').value : document.getElementById('regPassword').value;
+
+        if (!isLogin) {
+            const confirm = document.getElementById('regConfirm').value;
+            if (password !== confirm) {
+                return showAuthError('Passwörter stimmen nicht überein');
+            }
+            if (password.length < 6) {
+                return showAuthError('Passwort muss mindestens 6 Zeichen haben');
+            }
+        }
+
+        try {
+            const endpoint = isLogin ? '/api/v1/auth/login' : '/api/v1/auth/register';
+            const body = isLogin ? { username, password } : { username, password };
+            const res = await apiFetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                return showAuthError(data.error || 'Fehler');
+            }
+
+            if (data.token) {
+                setToken(data.token);
+                hideAuthModal();
+                initApp();
+            } else {
+                showAuthError(isLogin ? 'Anmeldung fehlgeschlagen' : 'Registrierung erfolgreich, bitte anmelden');
+                if (!isLogin) switchAuthTab('login');
+            }
+        } catch (e) {
+            showAuthError('Netzwerkfehler');
+        }
+    }
+
+    async function initApp() {
+        // Prüfen ob angemeldet
+        if (!getToken()) {
+            showAuthModal();
+            return;
+        }
+
+        // Auth prüfen
+        try {
+            const res = await apiFetch('/api/v1/auth/me');
+            const data = await res.json();
+            if (!data.success) {
+                clearToken();
+                showAuthModal();
+                return;
+            }
+        } catch (e) {
+            clearToken();
+            showAuthModal();
+            return;
+        }
+
+        // UI entsperren
+        document.getElementById('federationBar').style.display = 'flex';
+        document.getElementById('chatForm').style.display = 'block';
+        document.querySelector('.chat-messages').style.display = 'flex';
+        loadSessions();
+        loadPeers();
+    }
+
+    // Peers laden
+    async function loadPeers() {
+        try {
+            const res = await apiFetch('/api/v1/federation/peers');
+            const data = await res.json();
+            const select = document.getElementById('peerSelect');
+            select.innerHTML = '<option value="">-- Peer auswählen --</option>';
+            (data.peers || []).forEach((p, i) => {
+                const o = document.createElement('option');
+                o.value = i;
+                o.textContent = p;
+                select.appendChild(o);
+            });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    function changePeer() {
+        const select = document.getElementById('peerSelect');
+        const status = document.getElementById('federationStatus');
+        if (select.value) {
+            status.textContent = 'Peer gewählt';
+            status.className = 'federation-status online';
+        } else {
+            status.textContent = '';
+        }
+    }
+
+    async function managePeers() {
+        const peers = prompt('Peer-URLs kommagetrennt eingeben (leer zum Leeren):');
+        if (peers === null) return;
+        const list = peers.split(',').map(s => s.trim()).filter(s => s);
+        try {
+            // lösche alle, füge neu
+            // einfache Umsetzung: setzen via wiederholtes Hinzufügen nach Löschen
+            // hier nur Hinzufügen
+            for (const p of list) {
+                await apiFetch('/api/v1/federation/peers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: p })
+                });
+            }
+            loadPeers();
+            showNotification('Peers aktualisiert', 'success');
+        } catch (e) {
+            showNotification('Fehler beim Aktualisieren der Peers', 'error');
+        }
+    }
+
+    // Föderations-Nachricht an gewählten Peer senden
+    async function sendFederatedMessage() {
+        const select = document.getElementById('peerSelect');
+        const peerIndex = select.value;
+        if (!peerIndex) {
+            return showNotification('Bitte wähle einen Peer aus.', 'warning');
+        }
+        const targetUser = prompt('Ziel-Benutzername auf dem Peer-Router:');
+        if (!targetUser) return;
+        const content = document.getElementById('messageInput').value.trim();
+        if (!content) return;
+
+        document.getElementById('messageInput').value = '';
+        addUserMessage(content);
+
+        try {
+            const res = await apiFetch('/api/v1/federation/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peerIndex, targetUser, content })
+            });
+            const data = await res.json();
+            if (data.success) {
+                addAssistantMessage(data.reply.content || '', 'federation', data.reply.model);
+            } else {
+                showNotification(data.error || 'Föderations-Nachricht fehlgeschlagen', 'error');
+            }
+        } catch (e) {
+            showNotification('Fehler beim Senden über Peer', 'error');
+        }
+    }
+
+    // Initial
+    initApp();
+</script>

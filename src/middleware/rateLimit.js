@@ -5,7 +5,7 @@
  */
 
 const { RateLimiterMemory } = require('rate-limiter-flexible');
-const logger = require('./logger');
+const { logger } = require('./logger');
 
 // Rate-Limiter-Instanz
 let rateLimiter;

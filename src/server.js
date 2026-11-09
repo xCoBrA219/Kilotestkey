@@ -9,14 +9,19 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
-const logger = require('./middleware/logger');
-const { authMiddleware } = require('./middleware/auth');
+const axios = require('axios');
+const { logger, requestLogger } = require('./middleware/logger');
+const { authMiddleware, jwtAuthMiddleware } = require('./middleware/auth');
+const { registerUser, authenticateUser } = require('./utils/auth');
 const { rateLimitMiddleware } = require('./middleware/rateLimit');
 const ProviderManager = require('./providers');
 const RouterEngine = require('./router');
 
 // Request-Logs-Speicher
 let requestLogs = [];
+
+// Chat-Sessions-Speicher (im RAM, für Sprachchat-Historie)
+let chatSessions = {};
 
 /**
  * Erstellt und startet den Express-Server
@@ -47,7 +52,7 @@ async function startServer(config) {
   app.use(express.urlencoded({ extended: true }));
   
   // Request-Logging
-  app.use(logger.requestLogger);
+  app.use(requestLogger);
   
   // Rate Limiting
   if (config.server.rateLimit?.enabled) {
@@ -243,6 +248,37 @@ async function startServer(config) {
   app.get('/', (req, res) => {
     res.redirect('/dashboard');
   });
+
+  // Chat Page (Sprachchat im Browser)
+  app.get('/chat', async (req, res) => {
+    try {
+      const models = await providerManager.getAllModels();
+      const providerStatus = await providerManager.getProviderStatus();
+      const providers = Object.entries(providerStatus).map(([name, status]) => ({
+        name,
+        ...status
+      }));
+
+      res.render('pages/chat', {
+        title: 'Sprachchat',
+        active: 'chat',
+        models,
+        providers,
+        sessions: [],
+        messages: []
+      });
+    } catch (error) {
+      logger.error('Fehler beim Laden der Chat-Seite:', error);
+      res.render('pages/chat', {
+        title: 'Sprachchat',
+        active: 'chat',
+        models: [],
+        providers: [],
+        sessions: [],
+        messages: []
+      });
+    }
+  });
   
   // ========== API ROUTES ==========
   
@@ -386,17 +422,423 @@ async function startServer(config) {
     }
   });
   
-  // Streaming-Endpunkt
-  app.post('/api/v1/chat/completions/stream', (req, res) => {
-    res.status(501).json({
-      error: {
-        message: 'Streaming wird noch nicht unterstützt',
-        type: 'not_implemented',
-        code: 501
+  // Streaming-Endpunkt (SSE) für Sprachchat
+  app.post('/api/v1/chat/completions/stream', async (req, res) => {
+    try {
+      const requestId = req.headers['x-request-id'] || `ccr-stream-${Date.now()}`;
+      const { model, messages, ...rest } = req.body;
+
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({
+          error: { message: 'Nachrichten sind erforderlich', type: 'bad_request', code: 400 }
+        });
       }
-    });
+
+      // Route auflösen (Provider + Modell)
+      const resolved = await routerEngine.resolveRoute({ model, messages }, { headers: req.headers, requestId });
+      const provider = providerManager.getProvider(resolved.provider);
+
+      if (!provider) {
+        return res.status(404).json({
+          error: { message: `Provider "${resolved.provider}" nicht gefunden`, type: 'not_found', code: 404 }
+        });
+      }
+
+      const available = await providerManager.isProviderAvailable(resolved.provider);
+      if (!available) {
+        return res.status(503).json({
+          error: { message: `Provider "${resolved.provider}" nicht verfügbar`, type: 'service_unavailable', code: 503 }
+        });
+      }
+
+      // SSE-Header setzen
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+
+      let done = false;
+      const sendEvent = (type, data) => {
+        if (!done) {
+          res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
+        }
+      };
+
+      sendEvent('start', { requestId, provider: resolved.provider, model: resolved.model });
+
+      try {
+        if (typeof provider.streamChat === 'function') {
+          await provider.streamChat({ model: resolved.model, messages, ...rest }, (chunk) => {
+            sendEvent('delta', { content: chunk });
+          });
+        } else {
+          // Fallback: nicht-streamender Provider, gesamtes Ergebnis auf einmal senden
+          const response = await provider.chat({ model: resolved.model, messages, ...rest });
+          sendEvent('delta', { content: response.content || '' });
+          sendEvent('done', {
+            provider: response.provider,
+            model: response.model,
+            usage: response.usage,
+            finish_reason: response.finish_reason
+          });
+        }
+
+        if (!done) {
+          done = true;
+          sendEvent('done', { provider: resolved.provider, model: resolved.model });
+          res.write('data: [DONE]\n\n');
+          res.end();
+        }
+
+        // Request-Log
+        requestLogs.unshift({
+          timestamp: new Date().toLocaleString('de-DE'),
+          level: 'info',
+          requestId,
+          provider: resolved.provider,
+          model: resolved.model,
+          message: `Streaming-Chat an ${resolved.provider}:${resolved.model}`,
+          tokens: 0,
+          duration: 0
+        });
+        if (requestLogs.length > 1000) {
+          requestLogs = requestLogs.slice(0, 1000);
+        }
+      } catch (streamError) {
+        if (!done) {
+          done = true;
+          sendEvent('error', { message: streamError.message || 'Streaming-Fehler' });
+          res.end();
+        }
+        logger.error(`[${requestId}] Streaming-Fehler:`, streamError);
+      }
+    } catch (error) {
+      logger.error('Fehler bei Streaming-Chat-Anfrage:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: { message: error.message || 'Interner Serverfehler', type: 'server_error', code: 500 }
+        });
+      } else {
+        res.end();
+      }
+    }
   });
-  
+
+  // ========== Chat-Sessions API (Sprachchat) ==========
+
+  // Alle Chat-Sessions auflisten
+  app.get('/api/v1/chat/sessions', (req, res) => {
+    const sessions = Object.entries(chatSessions).map(([id, session]) => ({
+      id,
+      title: session.title,
+      model: session.model,
+      provider: session.provider,
+      messageCount: session.messages.length,
+      updatedAt: session.updatedAt,
+      createdAt: session.createdAt
+    }));
+    res.json({ success: true, sessions });
+  });
+
+  // Neue Chat-Session erstellen
+  app.post('/api/v1/chat/sessions', jwtAuthMiddleware, (req, res) => {
+    try {
+      const { title, model, provider } = req.body;
+      const id = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date().toISOString();
+
+      chatSessions[id] = {
+        id,
+        title: title || 'Neuer Chat',
+        model: model || '',
+        provider: provider || '',
+        userId: req.user.id,
+        username: req.user.username,
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+      };
+
+      res.json({ success: true, session: chatSessions[id] });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Einzelne Chat-Session abrufen
+  app.get('/api/v1/chat/sessions/:id', jwtAuthMiddleware, (req, res) => {
+    const { id } = req.params;
+    const session = chatSessions[id];
+
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Chat-Session nicht gefunden' });
+    }
+    // Nur Besitzer darf Session sehen
+    if (session.userId && session.userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Nicht der Besitzer dieser Session' });
+    }
+
+    res.json({ success: true, session });
+  });
+
+  // Nachricht zu Chat-Session hinzufügen (und Antwort generieren)
+  app.post('/api/v1/chat/sessions/:id/messages', jwtAuthMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const session = chatSessions[id];
+
+      if (!session) {
+        return res.status(404).json({ success: false, error: 'Chat-Session nicht gefunden' });
+      }
+      if (session.userId && session.userId !== req.user.id) {
+        return res.status(403).json({ success: false, error: 'Nicht der Besitzer dieser Session' });
+      }
+
+      const { content, model, provider, stream = false } = req.body;
+
+      if (!content) {
+        return res.status(400).json({ success: false, error: 'Nachrichteninhalt erforderlich' });
+      }
+
+      const userMessage = { role: 'user', content, userId: req.user.id };
+      session.messages.push(userMessage);
+
+      // Modell/Provider aus Session übernehmen, falls nicht übergeben
+      const targetModel = model || session.model;
+      const targetProvider = provider || session.provider;
+
+      const requestPayload = {
+        model: targetModel,
+        messages: session.messages,
+        stream
+      };
+
+      const headers = {};
+      if (targetProvider) {
+        headers['x-provider'] = targetProvider;
+      }
+
+      let result;
+      if (stream) {
+        // Streaming wird client-seitig über /stream gehandled; hier nur Session-Modell speichern
+        session.model = targetModel;
+        session.provider = targetProvider;
+        session.updatedAt = new Date().toISOString();
+        return res.json({ success: true, session, streamUrl: `/api/v1/chat/completions/stream` });
+      }
+
+      result = await routerEngine.routeRequest(requestPayload, { headers, requestId: `chat-${id}` });
+
+      const assistantMessage = {
+        role: 'assistant',
+        content: result.content,
+        provider: result.provider,
+        model: result.model,
+        usage: result.usage
+      };
+      session.messages.push(assistantMessage);
+      session.model = result.model || targetModel;
+      session.provider = result.provider || targetProvider;
+      session.updatedAt = new Date().toISOString();
+
+      res.json({ success: true, session, message: assistantMessage, result });
+    } catch (error) {
+      logger.error('Fehler beim Senden der Chat-Nachricht:', error);
+      res.status(500).json({ success: false, error: error.message || 'Interner Serverfehler' });
+    }
+  });
+
+  // Chat-Session löschen
+  app.delete('/api/v1/chat/sessions/:id', jwtAuthMiddleware, (req, res) => {
+    const { id } = req.params;
+    if (!chatSessions[id]) {
+      return res.status(404).json({ success: false, error: 'Chat-Session nicht gefunden' });
+    }
+    // Nur Besitzer darf löschen
+    if (chatSessions[id].userId && chatSessions[id].userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Nicht der Besitzer dieser Session' });
+    }
+    delete chatSessions[id];
+    res.json({ success: true, message: 'Chat-Session gelöscht' });
+  });
+
+  // ========== Auth (Benutzerkonten) ==========
+
+  // Registrierung
+  app.post('/api/v1/auth/register', (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Benutzername und Passwort erforderlich' });
+      }
+      const result = registerUser(username, password);
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+      res.json({ success: true, user: result.user });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Login
+  app.post('/api/v1/auth/login', (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Benutzername und Passwort erforderlich' });
+      }
+      const result = authenticateUser(username, password);
+      if (!result.success) {
+        return res.status(401).json({ success: false, error: result.error });
+      }
+      res.json({ success: true, token: result.token, user: result.user });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Eigene Daten
+  app.get('/api/v1/auth/me', jwtAuthMiddleware, (req, res) => {
+    res.json({ success: true, user: req.user });
+  });
+
+  // ========== Föderation (Router-zu-Router Chat) ==========
+
+  // Peers auflisten
+  app.get('/api/v1/federation/peers', jwtAuthMiddleware, (req, res) => {
+    const peers = (config.federation && config.federation.peers) || [];
+    res.json({ success: true, peers, enabled: !!config.federation?.enabled });
+  });
+
+  // Peer hinzufügen
+  app.post('/api/v1/federation/peers', jwtAuthMiddleware, (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ success: false, error: 'Peer-URL erforderlich' });
+      }
+      if (!config.federation) config.federation = { enabled: true, peers: [] };
+      if (!config.federation.peers) config.federation.peers = [];
+      if (config.federation.peers.includes(url)) {
+        return res.status(400).json({ success: false, error: 'Peer bereits hinzugefügt' });
+      }
+      config.federation.peers.push(url);
+      res.json({ success: true, peers: config.federation.peers });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Peer entfernen
+  app.delete('/api/v1/federation/peers/:index', jwtAuthMiddleware, (req, res) => {
+    try {
+      const { index } = req.params;
+      const idx = parseInt(index, 10);
+      if (!config.federation || !config.federation.peers || idx < 0 || idx >= config.federation.peers.length) {
+        return res.status(404).json({ success: false, error: 'Peer nicht gefunden' });
+      }
+      config.federation.peers.splice(idx, 1);
+      res.json({ success: true, peers: config.federation.peers });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Föderations-Status
+  app.get('/api/v1/federation/status', jwtAuthMiddleware, async (req, res) => {
+    const peers = (config.federation && config.federation.peers) || [];
+    const results = [];
+    for (const peer of peers) {
+      try {
+        const resp = await axios.get(`${peer.replace(/\/$/, '')}/api/v1/federation/status`, { timeout: 5000 });
+        results.push({ peer, online: true, ...resp.data });
+      } catch (error) {
+        results.push({ peer, online: false, error: error.message });
+      }
+    }
+    res.json({ success: true, enabled: !!config.federation?.enabled, peers: results });
+  });
+
+  // Nachricht an Peer-Router senden (Föderation)
+  app.post('/api/v1/federation/message', jwtAuthMiddleware, async (req, res) => {
+    try {
+      const { peerIndex, targetUser, content, model } = req.body;
+      const peers = (config.federation && config.federation.peers) || [];
+      const peerUrl = peers[parseInt(peerIndex, 10)];
+      if (!peerUrl) {
+        return res.status(400).json({ success: false, error: 'Peer nicht gefunden' });
+      }
+
+      // Eigene Session für den Empfänger nutzen / erstellen
+      let sessionId = req.body.sessionId;
+      let session = chatSessions[sessionId];
+      if (!session) {
+        const id = `fed-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        session = {
+          id,
+          title: `Föderation: ${targetUser}`,
+          model: model || '',
+          provider: '',
+          messages: [],
+          userId: req.user.id,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        chatSessions[id] = session;
+        sessionId = id;
+      }
+
+      // Eigene Nachricht (absender) speichern
+      session.messages.push({ role: 'user', content, userId: req.user.id, targetUser });
+      session.updatedAt = new Date().toISOString();
+
+      // An den Peer-Router weiterleiten
+      const base = peerUrl.replace(/\/$/, '');
+      const forwardResp = await axios.post(`${base}/api/v1/federation/relay`, {
+        fromUser: req.user.username,
+        targetUser,
+        content,
+        model,
+        sessionId
+      }, { timeout: 30000, headers: { 'Content-Type': 'application/json' } });
+
+      const reply = forwardResp.data;
+      session.messages.push({ role: 'assistant', content: reply.content || '', provider: 'federation', model: reply.model || model, userId: reply.fromUser });
+      session.updatedAt = new Date().toISOString();
+
+      res.json({ success: true, sessionId, reply });
+    } catch (error) {
+      logger.error('Föderations-Nachricht fehlgeschlagen:', error);
+      res.status(500).json({ success: false, error: error.message || 'Föderations-Nachricht fehlgeschlagen' });
+    }
+  });
+
+  // Relay-Endpunkt: empfangene Föderations-Nachricht beantworten (intern)
+  app.post('/api/v1/federation/relay', jwtAuthMiddleware, async (req, res) => {
+    try {
+      const { fromUser, targetUser, content, model, sessionId } = req.body;
+      // Ziel-Benutzer ist der eingeloggte (targetUser == req.user.username)
+      // Antwort generieren über lokalen Router
+      const routerResult = await routerEngine.routeRequest(
+        { model, messages: [{ role: 'user', content }] },
+        { headers: { 'x-provider': '' }, requestId: `relay-${Date.now()}` }
+      );
+
+      res.json({
+        success: true,
+        fromUser: req.user.username,
+        toUser: fromUser,
+        content: routerResult.content,
+        model: routerResult.model
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Get Stats
   app.get('/api/v1/stats', (req, res) => {
     const stats = {

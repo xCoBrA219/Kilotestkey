@@ -9,7 +9,8 @@ const AnthropicProvider = require('./anthropic');
 const DeepSeekProvider = require('./deepseek');
 const OpenRouterProvider = require('./openrouter');
 const OllamaProvider = require('./ollama');
-const logger = require('../middleware/logger');
+const CustomModelProvider = require('./custom');
+const { logger } = require('../middleware/logger');
 
 /**
  * Provider-Typen
@@ -19,7 +20,8 @@ const PROVIDER_TYPES = {
   anthropic: AnthropicProvider,
   deepseek: DeepSeekProvider,
   openrouter: OpenRouterProvider,
-  ollama: OllamaProvider
+  ollama: OllamaProvider,
+  custom: CustomModelProvider
 };
 
 /**
@@ -49,6 +51,11 @@ const DEFAULT_PROVIDER_CONFIGS = {
   ollama: {
     baseUrl: 'http://localhost:11434',
     models: ['llama3', 'mistral', 'phi3'],
+    enabled: true
+  },
+  custom: {
+    baseUrl: 'http://localhost:1234/v1',
+    models: [],
     enabled: true
   }
 };

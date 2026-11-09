@@ -7,7 +7,7 @@
 const { startServer } = require('./server');
 const { loadConfig } = require('./config/loader');
 const { validateConfig } = require('./config/validator');
-const logger = require('./middleware/logger');
+const { logger } = require('./middleware/logger');
 
 // Hauptfunktion
 async function main() {

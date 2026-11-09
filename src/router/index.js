@@ -4,7 +4,7 @@
  * Verwaltet das Routing von Anfragen zu den richtigen Providern
  */
 
-const logger = require('../middleware/logger');
+const { logger } = require('../middleware/logger');
 
 /**
  * Router-Engine
@@ -185,9 +185,43 @@ class RouterEngine {
   }
   
   /**
-   * Fügt eine neue Routing-Regel hinzu
-   * @param {Object} rule - Routing-Regel
+   * Löst das Routing auf, ohne die Anfrage auszuführen.
+   * Gibt den aufgelösten Provider-Namen und das Modell zurück.
+   * @param {Object} request - Anfrage-Parameter
+   * @param {Object} options - Optionen (Headers, etc.)
+   * @returns {Promise<{provider: string, model: string, target: string}>} Auflösungs-Ergebnis
    */
+  async resolveRoute(request, options = {}) {
+    const { requestId, headers } = options;
+    const { model } = request;
+
+    // 1. Erzwungener Provider in den Headern
+    const forcedProvider = headers['x-provider'] || headers['X-Provider'];
+    if (forcedProvider) {
+      return { provider: forcedProvider, model, target: forcedProvider };
+    }
+
+    // 2. Routing-Regeln anwenden
+    const matchedRule = this.matchRoutingRule(request, options);
+    if (matchedRule) {
+      const [providerName, ruleModel] = matchedRule.target.split(':');
+      return { provider: providerName, model: ruleModel || model, target: matchedRule.target };
+    }
+
+    // 3. Standard-Routing
+    if (this.config.default) {
+      const [providerName, defaultModel] = this.config.default.split(':');
+      return { provider: providerName, model: defaultModel || model, target: this.config.default };
+    }
+
+    // 4. Fallback-Routing (erster verfügbarer)
+    if (this.config.fallback.length > 0) {
+      const [providerName, fallbackModel] = this.config.fallback[0].split(':');
+      return { provider: providerName, model: fallbackModel || model, target: this.config.fallback[0] };
+    }
+
+    throw new Error('Keine Routing-Option verfügbar.');
+  }
   addRoutingRule(rule) {
     this.config.rules.push(rule);
     this.config.rules.sort((a, b) => (b.priority || 0) - (a.priority || 0));
